@@ -1,0 +1,37 @@
+# ESP-IDF build output
+build/
+bootloader/
+bootloader-prefix/
+esp-idf/
+gdbinit/
+
+# ESP-IDF generated
+sdkconfig.old
+*.pyc
+__pycache__/
+dependencies.lock
+managed_components/__lock*
+.esptool_py_*_args*
+flasher_args.json
+flash_args*
+flash_*_args
+*flash_args
+.flasher_args.json*
+project_description.json
+compile_commands.json
+
+# CMake / build artifacts
+cmake_install.cmake
+toolchain/asmflags
+toolchain/cflags
+toolchain/cxxflags
+toolchain/ldflags
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+*.swp
+*.swo

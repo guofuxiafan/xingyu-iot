@@ -1,0 +1,17 @@
+{
+  "idf.currentSetup": "C:\\esp\\v5.5.4\\esp-idf",
+  "idf.portWin": "COM7",
+  "idf.openOcdConfigs": [
+    "board/esp32p4-builtin.cfg"
+  ],
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32p4"
+  },
+  "clangd.path": "C:\\Espressif\\tools\\esp-clang\\esp-19.1.2_20250312\\esp-clang\\bin\\clangd.exe",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=d:\\WHR\\program\\iot\\camera\\build"
+  ],
+  "idf.flashType": "UART"
+}
