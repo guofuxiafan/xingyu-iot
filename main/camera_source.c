@@ -7,6 +7,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/param.h>
+#include <sys/time.h>
 #include <unistd.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -17,6 +18,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_video_device.h"
+#include "esp_video_ioctl.h"
 #include "example_video_common.h"
 #include "linux/videodev2.h"
 
@@ -32,6 +34,9 @@
 #define USB_OPEN_RETRY_DELAY_MS 2000
 #define WS_SEND_INTERVAL_MS     100
 #define DROP_LOG_INTERVAL_MS    1000
+#define USB_DQBUF_TIMEOUT_MS    1000
+#define USB_DQBUF_FAILURE_LIMIT 3
+#define CAPTURE_STATS_WINDOW_MS 5000
 
 struct camera_source {
     camera_source_config_t config;
@@ -47,7 +52,9 @@ struct camera_source {
     uint8_t *jpeg_out_buf;
     uint32_t jpeg_out_size;
     SemaphoreHandle_t encoder_lock;
-    TaskHandle_t task;
+    volatile TaskHandle_t task;
+    volatile bool active;
+    volatile bool stop_requested;
     uint32_t incomplete_mjpeg_drop_count;
     uint64_t next_incomplete_mjpeg_log_ms;
     uint32_t jpeg_encode_fail_count;
@@ -359,17 +366,29 @@ static void capture_task(void *arg)
 {
     camera_source_t *source = (camera_source_t *)arg;
     uint64_t last_send_ms = 0;
+    uint64_t stats_start_ms = 0;
+    uint32_t captured_frames = 0;
+    uint32_t dqbuf_failures = 0;
 
-    while (1) {
+    while (!__atomic_load_n(&source->stop_requested, __ATOMIC_ACQUIRE)) {
         struct v4l2_buffer buf = {
             .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
             .memory = V4L2_MEMORY_MMAP,
         };
 
         if (ioctl(source->fd, VIDIOC_DQBUF, &buf) != 0) {
+            if (source->config.kind == CAMERA_SOURCE_KIND_USB_UVC &&
+                ++dqbuf_failures >= USB_DQBUF_FAILURE_LIMIT) {
+                ESP_LOGW(TAG, "cam%d: no USB frames for %dms, marking source offline",
+                         source->config.camera_id,
+                         USB_DQBUF_TIMEOUT_MS * USB_DQBUF_FAILURE_LIMIT);
+                __atomic_store_n(&source->active, false, __ATOMIC_RELEASE);
+                break;
+            }
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }
+        dqbuf_failures = 0;
 
         if (!(buf.flags & V4L2_BUF_FLAG_DONE) || buf.index >= source->buffer_count) {
             ioctl(source->fd, VIDIOC_QBUF, &buf);
@@ -382,6 +401,22 @@ static void capture_task(void *arg)
                         ESP_CACHE_MSYNC_FLAG_INVALIDATE);
 
         uint64_t timestamp_ms = (uint64_t)(esp_timer_get_time() / 1000);
+        if (source->config.kind == CAMERA_SOURCE_KIND_USB_UVC) {
+            if (stats_start_ms == 0) {
+                stats_start_ms = timestamp_ms;
+            }
+            captured_frames++;
+            uint64_t stats_elapsed_ms = timestamp_ms - stats_start_ms;
+            if (stats_elapsed_ms >= CAPTURE_STATS_WINDOW_MS) {
+                uint32_t fps_x100 = (uint32_t)(((uint64_t)captured_frames * 100000) / stats_elapsed_ms);
+                ESP_LOGI(TAG, "cam%d: USB capture %" PRIu32 ".%02" PRIu32 "fps (%" PRIu32 " frames/%" PRIu64 "ms)",
+                         source->config.camera_id,
+                         fps_x100 / 100, fps_x100 % 100,
+                         captured_frames, stats_elapsed_ms);
+                stats_start_ms = timestamp_ms;
+                captured_frames = 0;
+            }
+        }
         if (last_send_ms != 0 && (timestamp_ms - last_send_ms) < WS_SEND_INTERVAL_MS) {
             ioctl(source->fd, VIDIOC_QBUF, &buf);
             continue;
@@ -466,6 +501,10 @@ static void capture_task(void *arg)
 
         ioctl(source->fd, VIDIOC_QBUF, &buf);
     }
+
+    __atomic_store_n(&source->active, false, __ATOMIC_RELEASE);
+    __atomic_store_n(&source->task, NULL, __ATOMIC_RELEASE);
+    vTaskDelete(NULL);
 }
 
 esp_err_t camera_source_create(const camera_source_config_t *config, camera_source_t **out_source)
@@ -497,6 +536,16 @@ esp_err_t camera_source_create(const camera_source_config_t *config, camera_sour
     ESP_GOTO_ON_ERROR(setup_buffers(source), fail, TAG, "cam%d: buffer setup failed", source->config.camera_id);
     ESP_GOTO_ON_ERROR(setup_encoder(source), fail, TAG, "cam%d: encoder setup failed", source->config.camera_id);
 
+    if (source->config.kind == CAMERA_SOURCE_KIND_USB_UVC) {
+        struct timeval timeout = {
+            .tv_sec = USB_DQBUF_TIMEOUT_MS / 1000,
+            .tv_usec = (USB_DQBUF_TIMEOUT_MS % 1000) * 1000,
+        };
+        ESP_GOTO_ON_FALSE(ioctl(source->fd, VIDIOC_S_DQBUF_TIMEOUT, &timeout) == 0,
+                          ESP_FAIL, fail, TAG, "cam%d: failed to set dequeue timeout",
+                          source->config.camera_id);
+    }
+
     *out_source = source;
     return ESP_OK;
 
@@ -520,12 +569,16 @@ esp_err_t camera_source_start(camera_source_t *source)
 
     char task_name[16];
     snprintf(task_name, sizeof(task_name), "cam_src_%d", source->config.camera_id);
-    BaseType_t ok = xTaskCreate(capture_task, task_name, 1024 * 7, source, 6, &source->task);
+    TaskHandle_t task = NULL;
+    __atomic_store_n(&source->stop_requested, false, __ATOMIC_RELEASE);
+    BaseType_t ok = xTaskCreate(capture_task, task_name, 1024 * 7, source, 6, &task);
     if (ok != pdPASS) {
         ioctl(source->fd, VIDIOC_STREAMOFF, &type);
         ESP_LOGE(TAG, "cam%d: failed to create capture task", source->config.camera_id);
         return ESP_ERR_NO_MEM;
     }
+    __atomic_store_n(&source->task, task, __ATOMIC_RELEASE);
+    __atomic_store_n(&source->active, true, __ATOMIC_RELEASE);
 
     ESP_LOGI(TAG, "cam%d: started %s %" PRIu32 "x%" PRIu32,
              source->config.camera_id,
@@ -564,7 +617,7 @@ void camera_source_get_info(camera_source_t *source, camera_source_info_t *info)
 
     info->camera_id = source->config.camera_id;
     info->kind = source->config.kind;
-    info->active = source->fd >= 0;
+    info->active = __atomic_load_n(&source->active, __ATOMIC_ACQUIRE);
     info->width = source->config.width;
     info->height = source->config.height;
     info->frame_rate = source->frame_rate;
@@ -575,7 +628,7 @@ void camera_source_get_info(camera_source_t *source, camera_source_info_t *info)
 
 bool camera_source_is_active(camera_source_t *source)
 {
-    return source && source->fd >= 0;
+    return source && __atomic_load_n(&source->active, __ATOMIC_ACQUIRE);
 }
 
 void camera_source_destroy(camera_source_t *source)
@@ -584,14 +637,33 @@ void camera_source_destroy(camera_source_t *source)
         return;
     }
 
-    if (source->task) {
-        vTaskDelete(source->task);
-        source->task = NULL;
+    __atomic_store_n(&source->stop_requested, true, __ATOMIC_RELEASE);
+    __atomic_store_n(&source->active, false, __ATOMIC_RELEASE);
+
+    for (int i = 0; i < 120 && __atomic_load_n(&source->task, __ATOMIC_ACQUIRE); i++) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+
+    bool stream_off_called = false;
+    if (__atomic_load_n(&source->task, __ATOMIC_ACQUIRE) && source->fd >= 0) {
+        int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        ioctl(source->fd, VIDIOC_STREAMOFF, &type);
+        stream_off_called = true;
+    }
+
+    for (int i = 0; i < 30 && __atomic_load_n(&source->task, __ATOMIC_ACQUIRE); i++) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    TaskHandle_t task = __atomic_exchange_n(&source->task, NULL, __ATOMIC_ACQ_REL);
+    if (task) {
+        vTaskDelete(task);
     }
 
     if (source->fd >= 0) {
-        int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        ioctl(source->fd, VIDIOC_STREAMOFF, &type);
+        if (!stream_off_called) {
+            int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+            ioctl(source->fd, VIDIOC_STREAMOFF, &type);
+        }
         close(source->fd);
         source->fd = -1;
     }

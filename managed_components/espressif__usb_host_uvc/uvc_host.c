@@ -942,8 +942,14 @@ esp_err_t uvc_host_stream_close(uvc_host_stream_hdl_t stream_hdl)
         }
     }
 
-    // Release all interfaces
-    ESP_ERROR_CHECK(usb_host_interface_release(p_uvc_host_driver->usb_client_hdl, uvc_stream->constant.dev_hdl, uvc_stream->constant.bInterfaceNumber));
+    // A disconnected device may have released the interface already. Local stream
+    // resources still need to be removed so the same fixed camera slot can reopen.
+    esp_err_t release_ret = usb_host_interface_release(p_uvc_host_driver->usb_client_hdl,
+                                                       uvc_stream->constant.dev_hdl,
+                                                       uvc_stream->constant.bInterfaceNumber);
+    if (release_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Interface release during stream close returned %s", esp_err_to_name(release_ret));
+    }
 
     UVC_ENTER_CRITICAL();
     SLIST_REMOVE(&p_uvc_host_driver->uvc_stream_list, uvc_stream, uvc_host_stream_s, list_entry);

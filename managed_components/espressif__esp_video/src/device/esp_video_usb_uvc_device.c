@@ -542,14 +542,20 @@ fail0:
 
 static esp_err_t uvc_video_stop(struct esp_video *video, uint32_t type)
 {
+    esp_err_t ret = ESP_OK;
     struct esp_video_buffer_element *element;
     struct uvc_video *device = VIDEO_PRIV_DATA(struct uvc_video *, video);
     struct esp_video_buffer *buffer = CAPTURE_VIDEO_BUF(video);
     int buffer_count = CAPTURE_VIDEO_BUF_COUNT(video);
 
-    ESP_RETURN_ON_FALSE(device->dev_addr, ESP_ERR_NOT_FOUND, TAG, "UVC device=%p is not connected", device);
+    if (!device->stream_hdl) {
+        return ESP_OK;
+    }
 
-    ESP_RETURN_ON_ERROR(uvc_host_stream_stop(device->stream_hdl), TAG, "Failed to stop UVC stream");
+    ret = uvc_host_stream_stop(device->stream_hdl);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "UVC stream stop returned %s; continuing local cleanup", esp_err_to_name(ret));
+    }
 
     /**
      * Free all cached frames to avoid UVC stream stop failed
@@ -558,7 +564,12 @@ static esp_err_t uvc_video_stop(struct esp_video *video, uint32_t type)
         uvc_host_frame_return(device->stream_hdl, (uvc_host_frame_t *)element->priv_data);
     }
 
-    ESP_RETURN_ON_ERROR(uvc_host_stream_close(device->stream_hdl), TAG, "Failed to close UVC stream");
+    ret = uvc_host_stream_close(device->stream_hdl);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to close UVC stream: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    device->stream_hdl = NULL;
 
     /**
      * Clear the private data of the buffer elements, so will not be passed to the UVC stream in the function uvc_video_notify.
@@ -574,10 +585,9 @@ static esp_err_t uvc_video_deinit(struct esp_video *video)
 {
     struct uvc_video *device = VIDEO_PRIV_DATA(struct uvc_video *, video);
 
-    ESP_RETURN_ON_FALSE(device->dev_addr, ESP_ERR_NOT_FOUND, TAG, "UVC device=%p is not connected", device);
-
     free(device->frame_info);
     device->frame_info = NULL;
+    device->frame_info_num = 0;
 
     xSemaphoreGive(device->ready_sem);
 

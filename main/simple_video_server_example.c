@@ -10,6 +10,7 @@
 #include <string.h>
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "cJSON.h"
 #include "esp_check.h"
@@ -52,6 +53,7 @@ extern const uint8_t assets_index_css_gz_end[] asm("_binary_index_css_gz_end");
 static const char *TAG = "camera_app";
 static camera_source_t *s_sources[CAMERA_SOURCE_COUNT_MAX];
 static uint8_t s_source_count;
+static SemaphoreHandle_t s_sources_mutex;
 
 static esp_err_t camera_frame_cb(const camera_source_frame_t *frame, void *user_ctx)
 {
@@ -77,6 +79,7 @@ static char *get_cameras_json(void)
     }
     cJSON_AddItemToObject(root, "cameras", cameras);
 
+    xSemaphoreTake(s_sources_mutex, portMAX_DELAY);
     for (int i = 0; i < s_source_count; i++) {
         camera_source_info_t info;
         camera_source_get_info(s_sources[i], &info);
@@ -120,6 +123,7 @@ static char *get_cameras_json(void)
         cJSON_AddStringToObject(camera, "sourceType", info.kind == CAMERA_SOURCE_KIND_USB_UVC ? "usb_uvc" : "csi");
         cJSON_AddItemToArray(cameras, camera);
     }
+    xSemaphoreGive(s_sources_mutex);
 
     char *output = cJSON_Print(root);
     cJSON_Delete(root);
@@ -160,10 +164,16 @@ static esp_err_t camera_settings_handler(httpd_req_t *req)
     ESP_GOTO_ON_FALSE(json_quality && cJSON_IsNumber(json_quality), ESP_ERR_INVALID_ARG, cleanup_json, TAG, "missing jpeg_quality");
 
     int index = json_index->valueint;
-    ESP_GOTO_ON_FALSE(index >= 0 && index < s_source_count && camera_source_is_active(s_sources[index]),
-                      ESP_ERR_INVALID_ARG, cleanup_json, TAG, "invalid camera index");
+    xSemaphoreTake(s_sources_mutex, portMAX_DELAY);
+    if (index < 0 || index >= s_source_count || !camera_source_is_active(s_sources[index])) {
+        xSemaphoreGive(s_sources_mutex);
+        ret = ESP_ERR_INVALID_ARG;
+        ESP_LOGE(TAG, "invalid camera index");
+        goto cleanup_json;
+    }
 
     ret = camera_source_set_jpeg_quality(s_sources[index], (uint8_t)json_quality->valueint);
+    xSemaphoreGive(s_sources_mutex);
     if (ret == ESP_ERR_NOT_SUPPORTED) {
         ESP_LOGW(TAG, "cam%d does not support runtime JPEG quality control", index);
         ret = ESP_OK;
@@ -251,6 +261,9 @@ static void usb_dual_retry_task(void *arg);
 
 static esp_err_t start_camera_sources(void)
 {
+    s_sources_mutex = xSemaphoreCreateMutex();
+    ESP_RETURN_ON_FALSE(s_sources_mutex, ESP_ERR_NO_MEM, TAG, "failed to create camera source mutex");
+
     const camera_source_config_t configs[] = {
 #if EXAMPLE_ENABLE_MIPI_CSI_CAM_SENSOR
         {
@@ -311,7 +324,9 @@ static esp_err_t start_camera_sources(void)
             continue;
         }
 
+        xSemaphoreTake(s_sources_mutex, portMAX_DELAY);
         s_sources[configs[i].camera_id] = source;
+        xSemaphoreGive(s_sources_mutex);
         valid_count++;
     }
 
@@ -355,7 +370,32 @@ static void usb_dual_retry_task(void *arg)
         },
     };
 
-    while (!s_usb_dual_ready) {
+    while (1) {
+        if (s_usb_dual_ready) {
+            xSemaphoreTake(s_sources_mutex, portMAX_DELAY);
+            bool both_active = camera_source_is_active(s_sources[1]) &&
+                               camera_source_is_active(s_sources[2]);
+            camera_source_t *old_sources[2] = {NULL, NULL};
+            if (!both_active) {
+                old_sources[0] = s_sources[1];
+                old_sources[1] = s_sources[2];
+                s_sources[1] = NULL;
+                s_sources[2] = NULL;
+                s_usb_dual_ready = false;
+            }
+            xSemaphoreGive(s_sources_mutex);
+
+            if (both_active) {
+                vTaskDelay(pdMS_TO_TICKS(500));
+                continue;
+            }
+
+            ESP_LOGW(TAG, "USB camera offline; restarting both USB streams");
+            camera_source_destroy(old_sources[0]);
+            camera_source_destroy(old_sources[1]);
+            vTaskDelay(pdMS_TO_TICKS(2000));
+        }
+
         camera_source_t *srcs[2] = {NULL, NULL};
         bool both_ok = true;
 
@@ -371,9 +411,11 @@ static void usb_dual_retry_task(void *arg)
         }
 
         if (both_ok) {
+            xSemaphoreTake(s_sources_mutex, portMAX_DELAY);
             s_sources[1] = srcs[0];
             s_sources[2] = srcs[1];
             s_usb_dual_ready = true;
+            xSemaphoreGive(s_sources_mutex);
             ESP_LOGI(TAG, "Dual USB cameras ready");
         } else {
             for (int i = 0; i < 2; i++) {
@@ -385,7 +427,6 @@ static void usb_dual_retry_task(void *arg)
             vTaskDelay(pdMS_TO_TICKS(2000));
         }
     }
-    vTaskDelete(NULL);
 }
 
 static void initialise_mdns(void)
