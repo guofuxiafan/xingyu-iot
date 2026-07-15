@@ -10,6 +10,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_cache.h"
 #include "esp_log.h"
 
 #include "uvc_stream.h" // For uvc_host_stream_pause()
@@ -21,7 +22,11 @@
 
 static const char *TAG = "uvc-isoc";
 
+#if CONFIG_EXAMPLE_USB_MINIMAL_VALIDATION_MODE || CONFIG_EXAMPLE_USB_NETWORK_VALIDATION_MODE
+#define UVC_ISOC_LOG_INTERVAL_MS 5000
+#else
 #define UVC_ISOC_LOG_INTERVAL_MS 1000
+#endif
 
 static inline void isoc_counter_increment(volatile uint32_t *counter)
 {
@@ -109,6 +114,72 @@ static void isoc_drop_current_frame(uvc_stream_t *uvc_stream)
     if (dropped_frame) {
         uvc_host_frame_return(uvc_stream, dropped_frame);
     }
+}
+
+static bool isoc_payload_get_pts(const uvc_payload_header_t *header, uint32_t *pts)
+{
+    if (!header->bmHeaderInfo.presentation_time) {
+        return false;
+    }
+
+    const uint8_t *raw = (const uint8_t *)header;
+    *pts = (uint32_t)raw[2] |
+           ((uint32_t)raw[3] << 8) |
+           ((uint32_t)raw[4] << 16) |
+           ((uint32_t)raw[5] << 24);
+    return true;
+}
+
+static void isoc_finish_current_frame(uvc_stream_t *uvc_stream)
+{
+    bool return_frame = true;
+
+    UVC_ENTER_CRITICAL();
+    uvc_host_frame_t *frame = uvc_stream->dynamic.current_frame;
+    uvc_stream->dynamic.current_frame = NULL;
+    const bool invoke_callback = uvc_stream->dynamic.streaming &&
+                                 uvc_stream->constant.frame_cb && frame &&
+                                 !uvc_stream->single_thread.skip_current_frame;
+    UVC_EXIT_CRITICAL();
+
+    if (invoke_callback) {
+        esp_err_t sync_ret = esp_cache_msync(frame->data, frame->data_len,
+                                             ESP_CACHE_MSYNC_FLAG_DIR_C2M |
+                                             ESP_CACHE_MSYNC_FLAG_TYPE_DATA |
+                                             ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+        if (sync_ret == ESP_OK) {
+            return_frame = uvc_stream->constant.frame_cb(frame, uvc_stream->constant.cb_arg);
+        } else {
+            isoc_counter_increment(&uvc_stream->diagnostics.frame_error);
+        }
+    }
+    if (return_frame && frame) {
+        uvc_host_frame_return(uvc_stream, frame);
+    }
+}
+
+static esp_err_t isoc_add_mjpeg_payload(uvc_host_frame_t *frame,
+                                        const uint8_t *data, size_t data_len,
+                                        bool *frame_complete)
+{
+    size_t append_len = data_len;
+    *frame_complete = false;
+
+    if (frame->data_len > 0 && data_len > 0 &&
+            frame->data[frame->data_len - 1] == JPEG_MARKER && data[0] == JPEG_EOI) {
+        append_len = 1;
+        *frame_complete = true;
+    } else {
+        for (size_t i = 1; i < data_len; i++) {
+            if (data[i - 1] == JPEG_MARKER && data[i] == JPEG_EOI) {
+                append_len = i + 1;
+                *frame_complete = true;
+                break;
+            }
+        }
+    }
+
+    return uvc_frame_add_data(frame, data, append_len);
 }
 
 /**
@@ -200,15 +271,26 @@ void isoc_transfer_callback(usb_transfer_t *transfer)
             goto next_isoc_packet;
         }
 
-        const bool start_of_frame = (uvc_stream->single_thread.current_frame_id != payload_header->bmHeaderInfo.frame_id);
+        const bool is_mjpeg = uvc_stream->dynamic.vs_format.format == UVC_VS_FORMAT_MJPEG;
+        const bool payload_has_soi = is_mjpeg && payload_data_len >= 2 &&
+                                     payload_data[0] == JPEG_MARKER && payload_data[1] == JPEG_SOI;
+        const bool fid_changed = uvc_stream->single_thread.current_frame_id != payload_header->bmHeaderInfo.frame_id;
+        const bool start_of_frame = fid_changed ||
+                                    (payload_has_soi && (uvc_stream->dynamic.current_frame ||
+                                                         uvc_stream->single_thread.skip_current_frame));
         if (start_of_frame) {
-            // We detected start of new frame. Update Frame ID and start fetching this frame
+            // A new FID or JPEG SOI is a hard boundary. Never carry incomplete data across it.
+            if (uvc_stream->dynamic.current_frame) {
+                isoc_counter_increment(&uvc_stream->diagnostics.missed_eof);
+                isoc_drop_current_frame(uvc_stream);
+            }
+
             uvc_stream->single_thread.current_frame_id   = payload_header->bmHeaderInfo.frame_id;
             uvc_stream->single_thread.skip_current_frame = payload_header->bmHeaderInfo.error;
+            uvc_stream->single_thread.frame_pts_valid = false;
 
             // Check mjpeg frame start
-            if (uvc_stream->dynamic.vs_format.format == UVC_VS_FORMAT_MJPEG &&
-                    (payload_data_len < 2 || payload_data[0] != JPEG_MARKER || payload_data[1] != JPEG_SOI)) {
+            if (is_mjpeg && !payload_has_soi) {
                 // We received frame with invalid frame, skip this frame
                 uvc_stream->single_thread.skip_current_frame = true;
                 isoc_counter_increment(&uvc_stream->diagnostics.invalid_soi);
@@ -226,13 +308,21 @@ void isoc_transfer_callback(usb_transfer_t *transfer)
                     isoc_counter_increment(&uvc_stream->diagnostics.buffer_underflow);
                     goto next_isoc_packet;
                 }
-            } else if (uvc_stream->dynamic.current_frame) {
-                // We received SoF but current_frame is not NULL: We missed EoF - reset the frame buffer
-                isoc_counter_increment(&uvc_stream->diagnostics.missed_eof);
-                UVC_EXIT_CRITICAL();
-                isoc_drop_current_frame(uvc_stream);
             } else {
                 UVC_EXIT_CRITICAL();
+            }
+        }
+
+        uint32_t packet_pts = 0;
+        if (!uvc_stream->single_thread.skip_current_frame &&
+                isoc_payload_get_pts(payload_header, &packet_pts)) {
+            if (!uvc_stream->single_thread.frame_pts_valid) {
+                uvc_stream->single_thread.frame_pts = packet_pts;
+                uvc_stream->single_thread.frame_pts_valid = true;
+            } else if (uvc_stream->single_thread.frame_pts != packet_pts) {
+                isoc_counter_increment(&uvc_stream->diagnostics.frame_error);
+                isoc_drop_current_frame(uvc_stream);
+                goto next_isoc_packet;
             }
         }
 
@@ -245,35 +335,34 @@ void isoc_transfer_callback(usb_transfer_t *transfer)
                 goto next_isoc_packet;
             }
 
-            esp_err_t ret = uvc_frame_add_data(current_frame, payload_data, payload_data_len);
+            bool mjpeg_complete = false;
+            esp_err_t ret = is_mjpeg ?
+                            isoc_add_mjpeg_payload(current_frame, payload_data, payload_data_len,
+                                                   &mjpeg_complete) :
+                            uvc_frame_add_data(current_frame, payload_data, payload_data_len);
             if (ret != ESP_OK) {
                 isoc_counter_increment(&uvc_stream->diagnostics.buffer_overflow);
                 isoc_drop_current_frame(uvc_stream);
                 goto next_isoc_packet;
             }
+
+            if (mjpeg_complete) {
+                // JPEG EOI is the authoritative boundary. Ignore padding until the next SOI/FID.
+                isoc_finish_current_frame(uvc_stream);
+                uvc_stream->single_thread.skip_current_frame = true;
+            }
         }
 
         // End of Frame. Pass the frame to user
         if (payload_header->bmHeaderInfo.end_of_frame) {
-            bool return_frame = true; // In case streaming is stopped ATM, we must return the frame
-
-            // Check if the user did not stop the stream in the meantime
-            UVC_ENTER_CRITICAL();
-            uvc_host_frame_t *this_frame = uvc_stream->dynamic.current_frame;
-            uvc_stream->dynamic.current_frame = NULL; // Stop writing more data to this frame
-
-            // Determine if we should invoke the frame callback:
-            // Only invoke the callback if streaming is active, a frame callback exists,
-            // and we have a valid frame to pass to the user.
-            const bool invoke_fb_callback = (uvc_stream->dynamic.streaming && uvc_stream->constant.frame_cb && this_frame && !uvc_stream->single_thread.skip_current_frame);
-            UVC_EXIT_CRITICAL();
-
-            if (invoke_fb_callback) {
-                return_frame = uvc_stream->constant.frame_cb(this_frame, uvc_stream->constant.cb_arg);
-            }
-            if (return_frame && this_frame) {
-                // The user has processed the frame in his callback, return it back to empty queue
-                uvc_host_frame_return(uvc_stream, this_frame);
+            if (is_mjpeg) {
+                // EOF without a JPEG EOI is an incomplete compressed frame.
+                if (uvc_stream->dynamic.current_frame) {
+                    isoc_counter_increment(&uvc_stream->diagnostics.frame_error);
+                    isoc_drop_current_frame(uvc_stream);
+                }
+            } else {
+                isoc_finish_current_frame(uvc_stream);
             }
         }
 next_isoc_packet:

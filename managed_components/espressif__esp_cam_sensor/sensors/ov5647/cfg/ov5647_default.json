@@ -26,11 +26,11 @@
             "gamma": {
                 "use_gamma_param": true,
                 "luma_env": "ae.luma.avg",
-                "luma_min_step": 16.0,
+                "luma_min_step": 8.0,
                 "table": [
                     {
-                        "luma": 71.1,
-                        "gamma_param": 0.72
+                        "luma": 50.0,
+                        "gamma_param": 0.55
                     }
                 ]
             },
@@ -108,15 +108,15 @@
                     "luma_env": "ae.luma.avg",
                     "threshold": 28,
                     "matrix": [
-                        1.00,
-                        0.00,
-                        0.00,
-                        0.00,
-                        1.00,
-                        0.00,
-                        0.00,
-                        0.00,
-                        1.00
+                        1.30,
+                        -0.10,
+                        -0.20,
+                        -0.15,
+                        1.25,
+                        -0.10,
+                        -0.15,
+                        -0.15,
+                        1.30
                     ]
                 },
                 "table": [

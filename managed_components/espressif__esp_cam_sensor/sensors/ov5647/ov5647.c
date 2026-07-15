@@ -77,6 +77,15 @@ static const esp_cam_sensor_isp_info_t ov5647_isp_info[] = {
             .bayer_type = ESP_CAM_SENSOR_BAYER_GBRG,
         }
     },
+    {
+        .isp_v1_info = {
+            .version = SENSOR_ISP_INFO_VERSION_DEFAULT,
+            .pclk = 88333333,
+            .vts = 3279,
+            .hts = 1796,
+            .bayer_type = ESP_CAM_SENSOR_BAYER_GBRG,
+        }
+    },
 };
 
 #ifndef CONFIG_CAMERA_OV5647_MIPI_IF_FORMAT_INDEX_DEFAULT
@@ -100,6 +109,9 @@ static const uint8_t ov5647_format_index[] = {
 #endif
 #if CONFIG_CAMERA_OV5647_MIPI_RAW10_1280X960_BINNING_45FPS
     4,
+#endif
+#if CONFIG_CAMERA_OV5647_MIPI_RAW10_1280X960_BINNING_15FPS
+    5,
 #endif
 };
 
@@ -198,6 +210,26 @@ static const esp_cam_sensor_format_t ov5647_format_info[] = {
         .isp_info = &ov5647_isp_info[4],
         .mipi_info = {
             .mipi_clk = OV5647_MIPI_CSI_LINE_RATE_1280x960_45FPS,
+            .lane_num = 2,
+            .line_sync_en = CONFIG_CAMERA_OV5647_CSI_LINESYNC_ENABLE ? true : false,
+        },
+        .reserved = NULL,
+    },
+#endif
+#if CONFIG_CAMERA_OV5647_MIPI_RAW10_1280X960_BINNING_15FPS
+    {
+        .name = "MIPI_2lane_24Minput_RAW10_1280x960_binning_15fps",
+        .format = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
+        .port = ESP_CAM_SENSOR_MIPI_CSI,
+        .xclk = 24000000,
+        .width = 1280,
+        .height = 960,
+        .regs = ov5647_mipi_2lane_24Minput_1280x960_raw10_15fps,
+        .regs_size = ARRAY_SIZE(ov5647_mipi_2lane_24Minput_1280x960_raw10_15fps),
+        .fps = 15,
+        .isp_info = &ov5647_isp_info[5],
+        .mipi_info = {
+            .mipi_clk = OV5647_MIPI_CSI_LINE_RATE_1280x960_15FPS,
             .lane_num = 2,
             .line_sync_en = CONFIG_CAMERA_OV5647_CSI_LINESYNC_ENABLE ? true : false,
         },

@@ -32,8 +32,18 @@
 #define JPEG_MIN_SIZE           16
 #define USB_OPEN_RETRIES        20
 #define USB_OPEN_RETRY_DELAY_MS 2000
-#define WS_SEND_INTERVAL_MS     100
+#define USB_WS_SEND_INTERVAL_MS 100
+#if CONFIG_EXAMPLE_USB_CSI_NETWORK_VALIDATION_MODE
+#define CSI_WS_SEND_INTERVAL_MS 500
+#else
+#define CSI_WS_SEND_INTERVAL_MS 100
+#endif
+#define CAMERA_PROCESSING_CORE  1
+#if CONFIG_EXAMPLE_USB_MINIMAL_VALIDATION_MODE || CONFIG_EXAMPLE_USB_NETWORK_VALIDATION_MODE
+#define DROP_LOG_INTERVAL_MS    5000
+#else
 #define DROP_LOG_INTERVAL_MS    1000
+#endif
 #define USB_DQBUF_TIMEOUT_MS    1000
 #define USB_DQBUF_FAILURE_LIMIT 3
 #define CAPTURE_STATS_WINDOW_MS 5000
@@ -57,6 +67,12 @@ struct camera_source {
     volatile bool stop_requested;
     uint32_t incomplete_mjpeg_drop_count;
     uint64_t next_incomplete_mjpeg_log_ms;
+    uint32_t mjpeg_padding_trim_count;
+    uint64_t mjpeg_padding_trim_bytes;
+    uint32_t mjpeg_padding_trim_max;
+    uint64_t next_mjpeg_padding_log_ms;
+    uint32_t mjpeg_boundary_merge_count;
+    uint64_t next_mjpeg_boundary_merge_log_ms;
     uint32_t jpeg_encode_fail_count;
     uint64_t next_jpeg_encode_fail_log_ms;
 };
@@ -68,6 +84,38 @@ static bool is_complete_jpeg(const uint8_t *data, uint32_t len)
     return data && len >= JPEG_MIN_SIZE &&
            data[0] == 0xFF && data[1] == 0xD8 &&
            data[len - 2] == 0xFF && data[len - 1] == 0xD9;
+}
+
+static bool normalize_mjpeg_frame(const uint8_t *data, uint32_t input_len,
+                                  uint32_t *jpeg_len, uint32_t *trailing_padding,
+                                  uint32_t *trailing_soi_offset)
+{
+    if (!jpeg_len || !trailing_padding || !trailing_soi_offset) {
+        return false;
+    }
+
+    *jpeg_len = 0;
+    *trailing_padding = 0;
+    *trailing_soi_offset = UINT32_MAX;
+    if (!data || input_len < JPEG_MIN_SIZE || data[0] != 0xFF || data[1] != 0xD8) {
+        return false;
+    }
+
+    for (uint32_t i = 2; i < input_len; i++) {
+        if (data[i - 1] == 0xFF && data[i] == 0xD9) {
+            *jpeg_len = i + 1;
+            *trailing_padding = input_len - *jpeg_len;
+            for (uint32_t j = *jpeg_len; j + 1 < input_len; j++) {
+                if (data[j] == 0xFF && data[j + 1] == 0xD8) {
+                    *trailing_soi_offset = j;
+                    break;
+                }
+            }
+            return true;
+        }
+    }
+
+    return false;
 }
 
 static bool is_raw_bayer_format(uint32_t pixfmt)
@@ -111,6 +159,47 @@ static void log_drop_limited(camera_source_t *source, uint32_t *count, uint64_t 
                  source->config.camera_id, reason, *count, DROP_LOG_INTERVAL_MS, last_len);
         *count = 0;
         *next_log_ms = now_ms + DROP_LOG_INTERVAL_MS;
+    }
+}
+
+static void log_mjpeg_padding_limited(camera_source_t *source, uint32_t padding_len)
+{
+    if (padding_len == 0) {
+        return;
+    }
+
+    source->mjpeg_padding_trim_count++;
+    source->mjpeg_padding_trim_bytes += padding_len;
+    source->mjpeg_padding_trim_max = MAX(source->mjpeg_padding_trim_max, padding_len);
+
+    uint64_t now_ms = (uint64_t)(esp_timer_get_time() / 1000);
+    if (source->next_mjpeg_padding_log_ms == 0 || now_ms >= source->next_mjpeg_padding_log_ms) {
+        uint64_t average = source->mjpeg_padding_trim_bytes / source->mjpeg_padding_trim_count;
+        ESP_LOGI(TAG, "cam%d: trimmed MJPEG trailing padding x%" PRIu32
+                 " in last %dms, last=%" PRIu32 " avg=%" PRIu64 " max=%" PRIu32,
+                 source->config.camera_id, source->mjpeg_padding_trim_count,
+                 DROP_LOG_INTERVAL_MS, padding_len, average, source->mjpeg_padding_trim_max);
+        source->mjpeg_padding_trim_count = 0;
+        source->mjpeg_padding_trim_bytes = 0;
+        source->mjpeg_padding_trim_max = 0;
+        source->next_mjpeg_padding_log_ms = now_ms + DROP_LOG_INTERVAL_MS;
+    }
+}
+
+static void log_mjpeg_boundary_merge_limited(camera_source_t *source,
+                                              uint32_t soi_offset,
+                                              uint32_t trailing_len)
+{
+    source->mjpeg_boundary_merge_count++;
+    uint64_t now_ms = (uint64_t)(esp_timer_get_time() / 1000);
+    if (source->next_mjpeg_boundary_merge_log_ms == 0 ||
+            now_ms >= source->next_mjpeg_boundary_merge_log_ms) {
+        ESP_LOGW(TAG, "cam%d: possible merged MJPEG boundary x%" PRIu32
+                 " in last %dms, trailing_soi_offset=%" PRIu32 " trailing_len=%" PRIu32,
+                 source->config.camera_id, source->mjpeg_boundary_merge_count,
+                 DROP_LOG_INTERVAL_MS, soi_offset, trailing_len);
+        source->mjpeg_boundary_merge_count = 0;
+        source->next_mjpeg_boundary_merge_log_ms = now_ms + DROP_LOG_INTERVAL_MS;
     }
 }
 
@@ -369,6 +458,8 @@ static void capture_task(void *arg)
     uint64_t stats_start_ms = 0;
     uint32_t captured_frames = 0;
     uint32_t dqbuf_failures = 0;
+    const uint32_t send_interval_ms = source->config.kind == CAMERA_SOURCE_KIND_CSI ?
+                                      CSI_WS_SEND_INTERVAL_MS : USB_WS_SEND_INTERVAL_MS;
 
     while (!__atomic_load_n(&source->stop_requested, __ATOMIC_ACQUIRE)) {
         struct v4l2_buffer buf = {
@@ -417,7 +508,7 @@ static void capture_task(void *arg)
                 captured_frames = 0;
             }
         }
-        if (last_send_ms != 0 && (timestamp_ms - last_send_ms) < WS_SEND_INTERVAL_MS) {
+        if (last_send_ms != 0 && (timestamp_ms - last_send_ms) < send_interval_ms) {
             ioctl(source->fd, VIDIOC_QBUF, &buf);
             continue;
         }
@@ -426,14 +517,35 @@ static void capture_task(void *arg)
         uint32_t jpeg_len = 0;
 
         if (source->pixel_format == V4L2_PIX_FMT_JPEG) {
-            jpeg_src = source->buffer[buf.index];
-            jpeg_len = buf.bytesused;
-            if (!is_complete_jpeg(jpeg_src, jpeg_len)) {
+            uint8_t *mjpeg_data = source->buffer[buf.index];
+            jpeg_src = mjpeg_data;
+            uint32_t input_len = buf.bytesused;
+            uint32_t trailing_padding = 0;
+            uint32_t trailing_soi_offset = UINT32_MAX;
+            if (input_len > source->buffer_size[buf.index] || input_len < JPEG_MIN_SIZE ||
+                    mjpeg_data[0] != 0xFF || mjpeg_data[1] != 0xD8) {
                 log_drop_limited(source,
                                  &source->incomplete_mjpeg_drop_count,
                                  &source->next_incomplete_mjpeg_log_ms,
                                  "drop incomplete MJPEG frame",
-                                 jpeg_len);
+                                 input_len);
+                ioctl(source->fd, VIDIOC_QBUF, &buf);
+                continue;
+            }
+
+            if (normalize_mjpeg_frame(mjpeg_data, input_len, &jpeg_len,
+                                      &trailing_padding, &trailing_soi_offset)) {
+                if (trailing_soi_offset != UINT32_MAX) {
+                    log_mjpeg_boundary_merge_limited(source, trailing_soi_offset,
+                                                      trailing_padding);
+                }
+                log_mjpeg_padding_limited(source, trailing_padding);
+            } else {
+                log_drop_limited(source,
+                                 &source->incomplete_mjpeg_drop_count,
+                                 &source->next_incomplete_mjpeg_log_ms,
+                                 "drop MJPEG frame without EOI",
+                                 input_len);
                 ioctl(source->fd, VIDIOC_QBUF, &buf);
                 continue;
             }
@@ -571,7 +683,8 @@ esp_err_t camera_source_start(camera_source_t *source)
     snprintf(task_name, sizeof(task_name), "cam_src_%d", source->config.camera_id);
     TaskHandle_t task = NULL;
     __atomic_store_n(&source->stop_requested, false, __ATOMIC_RELEASE);
-    BaseType_t ok = xTaskCreate(capture_task, task_name, 1024 * 7, source, 6, &task);
+    BaseType_t ok = xTaskCreatePinnedToCore(capture_task, task_name, 1024 * 7,
+                                            source, 6, &task, CAMERA_PROCESSING_CORE);
     if (ok != pdPASS) {
         ioctl(source->fd, VIDIOC_STREAMOFF, &type);
         ESP_LOGE(TAG, "cam%d: failed to create capture task", source->config.camera_id);

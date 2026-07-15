@@ -16,6 +16,7 @@
 #include "esp_check.h"
 #include "esp_err.h"
 #include "esp_event.h"
+#include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_netif.h"
@@ -55,9 +56,43 @@ static camera_source_t *s_sources[CAMERA_SOURCE_COUNT_MAX];
 static uint8_t s_source_count;
 static SemaphoreHandle_t s_sources_mutex;
 
+#define MEMORY_DIAGNOSTICS_INTERVAL_MS 60000
+
+static void memory_diagnostics_task(void *arg)
+{
+    (void)arg;
+    size_t min_internal_largest = SIZE_MAX;
+    size_t min_psram_largest = SIZE_MAX;
+
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(MEMORY_DIAGNOSTICS_INTERVAL_MS));
+
+        size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        size_t internal_min = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        size_t internal_largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+        size_t psram_min = heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM);
+        size_t psram_largest = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
+
+        min_internal_largest = MIN(min_internal_largest, internal_largest);
+        min_psram_largest = MIN(min_psram_largest, psram_largest);
+        ESP_LOGI(TAG, "heap/60s: internal free=%u min=%u largest=%u min_largest=%u; "
+                 "PSRAM free=%u min=%u largest=%u min_largest=%u",
+                 (unsigned)internal_free, (unsigned)internal_min,
+                 (unsigned)internal_largest, (unsigned)min_internal_largest,
+                 (unsigned)psram_free, (unsigned)psram_min,
+                 (unsigned)psram_largest, (unsigned)min_psram_largest);
+    }
+}
+
 static esp_err_t camera_frame_cb(const camera_source_frame_t *frame, void *user_ctx)
 {
     (void)user_ctx;
+
+#if CONFIG_EXAMPLE_USB_MINIMAL_VALIDATION_MODE
+    (void)frame;
+    return ESP_OK;
+#else
 
     ws_streamer_frame_t ws_frame = {
         .camera_id = frame->camera_id,
@@ -66,6 +101,7 @@ static esp_err_t camera_frame_cb(const camera_source_frame_t *frame, void *user_
         .jpeg_len = frame->jpeg_len,
     };
     return ws_streamer_submit(&ws_frame);
+#endif
 }
 
 static char *get_cameras_json(void)
@@ -265,7 +301,10 @@ static esp_err_t start_camera_sources(void)
     ESP_RETURN_ON_FALSE(s_sources_mutex, ESP_ERR_NO_MEM, TAG, "failed to create camera source mutex");
 
     const camera_source_config_t configs[] = {
-#if EXAMPLE_ENABLE_MIPI_CSI_CAM_SENSOR
+#if EXAMPLE_ENABLE_MIPI_CSI_CAM_SENSOR && \
+    !CONFIG_EXAMPLE_USB_MINIMAL_VALIDATION_MODE && \
+    (!CONFIG_EXAMPLE_USB_NETWORK_VALIDATION_MODE || \
+     CONFIG_EXAMPLE_USB_CSI_NETWORK_VALIDATION_MODE)
         {
             .camera_id = 0,
             .kind = CAMERA_SOURCE_KIND_CSI,
@@ -288,6 +327,10 @@ static esp_err_t start_camera_sources(void)
             .jpeg_quality = USB_JPEG_QUALITY,
             .frame_cb = camera_frame_cb,
         },
+#if CONFIG_EXAMPLE_USB_UVC_DEVICES_NUM > 1 && \
+    !CONFIG_EXAMPLE_USB_MINIMAL_VALIDATION_MODE && \
+    (!CONFIG_EXAMPLE_USB_NETWORK_VALIDATION_MODE || \
+     CONFIG_EXAMPLE_DUAL_USB_NETWORK_VALIDATION_MODE)
         {
             .camera_id = 2,
             .kind = CAMERA_SOURCE_KIND_USB_UVC,
@@ -299,6 +342,7 @@ static esp_err_t start_camera_sources(void)
             .jpeg_quality = USB_JPEG_QUALITY,
             .frame_cb = camera_frame_cb,
         },
+#endif
 #endif
     };
 
@@ -338,14 +382,14 @@ static esp_err_t start_camera_sources(void)
         xTaskCreate(usb_dual_retry_task, "usb_dual_retry", 4096, NULL, 5, NULL);
     }
 
-    return valid_count > 0 ? ESP_OK : ESP_ERR_NOT_FOUND;
+    return (valid_count > 0 || has_usb) ? ESP_OK : ESP_ERR_NOT_FOUND;
 }
 
 static bool s_usb_dual_ready = false;
 
 static void usb_dual_retry_task(void *arg)
 {
-    const camera_source_config_t usb_configs[2] = {
+    const camera_source_config_t usb_configs[] = {
         {
             .camera_id = 1,
             .kind = CAMERA_SOURCE_KIND_USB_UVC,
@@ -357,6 +401,10 @@ static void usb_dual_retry_task(void *arg)
             .jpeg_quality = USB_JPEG_QUALITY,
             .frame_cb = camera_frame_cb,
         },
+#if CONFIG_EXAMPLE_USB_UVC_DEVICES_NUM > 1 && \
+    !CONFIG_EXAMPLE_USB_MINIMAL_VALIDATION_MODE && \
+    (!CONFIG_EXAMPLE_USB_NETWORK_VALIDATION_MODE || \
+     CONFIG_EXAMPLE_DUAL_USB_NETWORK_VALIDATION_MODE)
         {
             .camera_id = 2,
             .kind = CAMERA_SOURCE_KIND_USB_UVC,
@@ -368,64 +416,74 @@ static void usb_dual_retry_task(void *arg)
             .jpeg_quality = USB_JPEG_QUALITY,
             .frame_cb = camera_frame_cb,
         },
+#endif
     };
+    const int usb_count = sizeof(usb_configs) / sizeof(usb_configs[0]);
 
     while (1) {
         if (s_usb_dual_ready) {
             xSemaphoreTake(s_sources_mutex, portMAX_DELAY);
-            bool both_active = camera_source_is_active(s_sources[1]) &&
-                               camera_source_is_active(s_sources[2]);
+            bool all_active = true;
             camera_source_t *old_sources[2] = {NULL, NULL};
-            if (!both_active) {
-                old_sources[0] = s_sources[1];
-                old_sources[1] = s_sources[2];
-                s_sources[1] = NULL;
-                s_sources[2] = NULL;
+            for (int i = 0; i < usb_count; i++) {
+                int camera_id = usb_configs[i].camera_id;
+                if (!camera_source_is_active(s_sources[camera_id])) {
+                    all_active = false;
+                }
+            }
+            if (!all_active) {
+                for (int i = 0; i < usb_count; i++) {
+                    int camera_id = usb_configs[i].camera_id;
+                    old_sources[i] = s_sources[camera_id];
+                    s_sources[camera_id] = NULL;
+                }
                 s_usb_dual_ready = false;
             }
             xSemaphoreGive(s_sources_mutex);
 
-            if (both_active) {
+            if (all_active) {
                 vTaskDelay(pdMS_TO_TICKS(500));
                 continue;
             }
 
-            ESP_LOGW(TAG, "USB camera offline; restarting both USB streams");
-            camera_source_destroy(old_sources[0]);
-            camera_source_destroy(old_sources[1]);
+            ESP_LOGW(TAG, "USB camera offline; restarting %d USB stream(s)", usb_count);
+            for (int i = 0; i < usb_count; i++) {
+                camera_source_destroy(old_sources[i]);
+            }
             vTaskDelay(pdMS_TO_TICKS(2000));
         }
 
         camera_source_t *srcs[2] = {NULL, NULL};
-        bool both_ok = true;
+        bool all_ok = true;
 
-        for (int i = 0; i < 2; i++) {
+        for (int i = 0; i < usb_count; i++) {
             if (camera_source_create(&usb_configs[i], &srcs[i]) != ESP_OK) {
-                both_ok = false;
+                all_ok = false;
                 break;
             }
         }
-        for (int i = 0; both_ok && i < 2; i++) {
+        for (int i = 0; all_ok && i < usb_count; i++) {
             if (camera_source_start(srcs[i]) != ESP_OK) {
-                both_ok = false;
+                all_ok = false;
                 break;
             }
         }
 
-        if (both_ok) {
+        if (all_ok) {
             xSemaphoreTake(s_sources_mutex, portMAX_DELAY);
-            s_sources[1] = srcs[0];
-            s_sources[2] = srcs[1];
+            for (int i = 0; i < usb_count; i++) {
+                s_sources[usb_configs[i].camera_id] = srcs[i];
+            }
             s_usb_dual_ready = true;
             xSemaphoreGive(s_sources_mutex);
-            ESP_LOGI(TAG, "Dual USB cameras ready");
+            ESP_LOGI(TAG, "%d USB camera(s) ready", usb_count);
         } else {
-            for (int i = 0; i < 2; i++) {
+            for (int i = 0; i < usb_count; i++) {
                 if (srcs[i]) {
                     camera_source_destroy(srcs[i]);
                 }
             }
-            ESP_LOGW(TAG, "Dual USB init failed, retrying in 2s");
+            ESP_LOGW(TAG, "USB init failed, retrying in 2s");
             vTaskDelay(pdMS_TO_TICKS(2000));
         }
     }
@@ -448,6 +506,57 @@ static void initialise_mdns(void)
 
 void app_main(void)
 {
+#if CONFIG_EXAMPLE_USB_MINIMAL_VALIDATION_MODE
+    ESP_LOGW(TAG, "USB minimal validation mode: CSI, Wi-Fi, WebSocket and HTTP are disabled");
+    ESP_ERROR_CHECK(example_video_init());
+    ESP_ERROR_CHECK(start_camera_sources());
+    ESP_LOGI(TAG, "USB minimal validation started; connect one camera directly to the USB root port");
+    return;
+#elif CONFIG_EXAMPLE_USB_NETWORK_VALIDATION_MODE
+#if CONFIG_EXAMPLE_DUAL_USB_NETWORK_VALIDATION_MODE
+    ESP_LOGW(TAG, "Dual USB network validation mode: HUB port 1 -> cam1, port 3 -> cam2; CSI and HTTP are disabled");
+#elif CONFIG_EXAMPLE_USB_CSI_NETWORK_VALIDATION_MODE
+    ESP_LOGW(TAG, "USB + CSI network validation mode: one HUB USB camera plus CSI; HTTP is disabled");
+#elif CONFIG_EXAMPLE_USB_HUB_VALIDATION_MODE
+    ESP_LOGW(TAG, "USB HUB network validation mode: connect one camera to HUB port 1 or port 3; CSI and HTTP are disabled");
+#else
+    ESP_LOGW(TAG, "USB network validation mode: CSI and HTTP are disabled");
+#endif
+
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ESP_ERROR_CHECK(nvs_flash_init());
+    }
+
+    ESP_ERROR_CHECK(example_video_init());
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    ESP_ERROR_CHECK(sta_connect_from_nvs());
+
+    char pc_ip[16] = {0};
+    ESP_ERROR_CHECK(wifi_cred_store_load_pc_ip(pc_ip, sizeof(pc_ip)));
+    ESP_ERROR_CHECK(strlen(pc_ip) > 0 ? ESP_OK : ESP_ERR_INVALID_STATE);
+
+    char ws_url[64] = {0};
+    snprintf(ws_url, sizeof(ws_url), "ws://%s:8765", pc_ip);
+    ESP_ERROR_CHECK(ws_streamer_start(ws_url));
+    ESP_ERROR_CHECK(start_camera_sources());
+#if CONFIG_EXAMPLE_USB_CSI_NETWORK_VALIDATION_MODE || \
+    CONFIG_EXAMPLE_DUAL_USB_NETWORK_VALIDATION_MODE
+    BaseType_t diag_ok = xTaskCreatePinnedToCore(memory_diagnostics_task, "memory_diag",
+                                                 3072, NULL, 2, NULL, 1);
+    ESP_ERROR_CHECK(diag_ok == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
+#if CONFIG_EXAMPLE_DUAL_USB_NETWORK_VALIDATION_MODE
+    ESP_LOGI(TAG, "cam1 and cam2 USB frames streaming to %s; memory diagnostics every 60s", ws_url);
+#else
+    ESP_LOGI(TAG, "USB and CSI frames streaming to %s; memory diagnostics every 60s", ws_url);
+#endif
+#else
+    ESP_LOGI(TAG, "USB frames streaming to %s; CSI and HTTP remain disabled", ws_url);
+#endif
+    return;
+#else
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -491,4 +600,5 @@ void app_main(void)
         ESP_LOGI(TAG, "NVS not provisioned, entering AP provisioning mode");
         provisioning_manager_run_ap_mode();
     }
+#endif
 }

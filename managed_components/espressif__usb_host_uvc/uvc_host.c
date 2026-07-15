@@ -1131,6 +1131,8 @@ esp_err_t uvc_host_stream_unpause(uvc_host_stream_hdl_t stream_hdl)
     // We set current_frame_id to illegal value (FrameID can be 0 or 1) so we catch SoF of the very first frame
     stream_hdl->single_thread.current_frame_id = 2;
     stream_hdl->single_thread.next_bulk_packet = UVC_STREAM_BULK_PACKET_SOF;
+    stream_hdl->single_thread.skip_current_frame = false;
+    stream_hdl->single_thread.frame_pts_valid = false;
     UVC_EXIT_CRITICAL();
 
     for (int i = 0; i < stream_hdl->constant.num_of_xfers; i++) {
@@ -1209,14 +1211,26 @@ esp_err_t uvc_host_get_frame_list(uint8_t dev_addr, uint8_t uvc_stream_index, uv
 {
     UVC_CHECK(list_size, ESP_ERR_INVALID_ARG);
 
-    usb_device_handle_t dev_hdl;
+    usb_device_handle_t dev_hdl = NULL;
     const usb_config_desc_t *config_desc = NULL;
-    if (usb_host_device_open(p_uvc_host_driver->usb_client_hdl, dev_addr, &dev_hdl) == ESP_OK) {
-        usb_host_get_active_config_descriptor(dev_hdl, &config_desc);
-        ESP_RETURN_ON_ERROR(usb_host_device_close(p_uvc_host_driver->usb_client_hdl, dev_hdl), TAG, "Unable to close USB device");
+    esp_err_t ret = usb_host_device_open(p_uvc_host_driver->usb_client_hdl, dev_addr, &dev_hdl);
+    if (ret != ESP_OK) {
+        return ret;
     }
 
-    return uvc_desc_get_frame_list(config_desc, uvc_stream_index, frame_info_list, list_size);
+    ret = usb_host_get_active_config_descriptor(dev_hdl, &config_desc);
+    if (ret == ESP_OK) {
+        /* config_desc belongs to the opened device. Parse it before dropping
+         * the final handle, otherwise a stream reopen can dereference stale
+         * descriptor storage. */
+        ret = uvc_desc_get_frame_list(config_desc, uvc_stream_index, frame_info_list, list_size);
+    }
+
+    esp_err_t close_ret = usb_host_device_close(p_uvc_host_driver->usb_client_hdl, dev_hdl);
+    if (ret == ESP_OK && close_ret != ESP_OK) {
+        ret = close_ret;
+    }
+    return ret;
 }
 
 esp_err_t uvc_host_get_device_parent_port(uint8_t dev_addr, uint8_t *parent_port_num)

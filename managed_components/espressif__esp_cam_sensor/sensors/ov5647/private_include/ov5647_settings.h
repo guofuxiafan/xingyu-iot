@@ -26,6 +26,8 @@ extern "C" {
 #define OV5647_MIPI_CSI_LINE_RATE_1920x1080_30FPS  (OV5647_IDI_CLOCK_RATE_1920x1080_30FPS * 5)
 #define OV5647_IDI_CLOCK_RATE_1280x960_45FPS        (88333333ULL)
 #define OV5647_MIPI_CSI_LINE_RATE_1280x960_45FPS    (OV5647_IDI_CLOCK_RATE_1280x960_45FPS * 5)
+#define OV5647_IDI_CLOCK_RATE_1280x960_15FPS        (88333333ULL)
+#define OV5647_MIPI_CSI_LINE_RATE_1280x960_15FPS    (OV5647_IDI_CLOCK_RATE_1280x960_15FPS * 5)
 #define OV5647_8BIT_MODE                           (0x18)
 #define OV5647_10BIT_MODE                          (0x1A)
 #define OV5647_MIPI_CTRL00_CLOCK_LANE_GATE         BIT(5)
@@ -48,6 +50,8 @@ static const ov5647_reginfo_t ov5647_mipi_reset_regs[] = {
 #include "ov5647_mipi_2lane_24Minput_800x1280_raw8_50fps.h"
 
 #include "ov5647_mipi_2lane_24Minput_1280x960_raw10_45fps.h"
+
+#include "ov5647_mipi_2lane_24Minput_1280x960_raw10_15fps.h"
 
 #include "ov5647_mipi_2lane_24Minput_1920x1080_raw10_30fps.h"
 

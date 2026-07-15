@@ -10,10 +10,12 @@
 #include "esp_check.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_websocket_client.h"
 
 #define WS_POOL_NODES 3
 #define WS_QUEUE_LEN  3
+#define WS_PROCESSING_CORE 1
 
 typedef struct {
     uint8_t data[WS_STREAMER_FRAME_HEADER_SIZE + WS_STREAMER_MAX_JPEG_SIZE];
@@ -29,6 +31,32 @@ static SemaphoreHandle_t s_pool_lock;
 static QueueHandle_t s_queue;
 static TaskHandle_t s_send_task;
 static ws_frame_node_t *s_pool;
+static volatile uint32_t s_pool_drop_count;
+static volatile uint32_t s_queue_drop_count;
+static volatile int64_t s_next_drop_log_us;
+
+static void log_submit_drop_limited(bool pool_empty)
+{
+    if (pool_empty) {
+        __atomic_fetch_add(&s_pool_drop_count, 1, __ATOMIC_RELAXED);
+    } else {
+        __atomic_fetch_add(&s_queue_drop_count, 1, __ATOMIC_RELAXED);
+    }
+
+    int64_t now_us = esp_timer_get_time();
+    int64_t next_us = __atomic_load_n(&s_next_drop_log_us, __ATOMIC_RELAXED);
+    if (now_us < next_us ||
+            !__atomic_compare_exchange_n(&s_next_drop_log_us, &next_us,
+                                         now_us + 5000000, false,
+                                         __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+        return;
+    }
+
+    uint32_t pool_drops = __atomic_exchange_n(&s_pool_drop_count, 0, __ATOMIC_RELAXED);
+    uint32_t queue_drops = __atomic_exchange_n(&s_queue_drop_count, 0, __ATOMIC_RELAXED);
+    ESP_LOGW(TAG, "submit drops/5000ms: pool_empty=%" PRIu32 " queue_full=%" PRIu32,
+             pool_drops, queue_drops);
+}
 
 static ws_frame_node_t *grab_pool_node(void)
 {
@@ -123,7 +151,9 @@ esp_err_t ws_streamer_start(const char *url)
         ESP_RETURN_ON_FALSE(s_queue, ESP_ERR_NO_MEM, TAG, "failed to create WebSocket queue");
     }
     if (!s_send_task) {
-        BaseType_t ok = xTaskCreate(ws_send_task, "ws_send", 1024 * 6, NULL, 5, &s_send_task);
+        BaseType_t ok = xTaskCreatePinnedToCore(ws_send_task, "ws_send", 1024 * 6,
+                                                NULL, 5, &s_send_task,
+                                                WS_PROCESSING_CORE);
         ESP_RETURN_ON_FALSE(ok == pdPASS, ESP_ERR_NO_MEM, TAG, "failed to create WebSocket send task");
     }
 
@@ -158,6 +188,7 @@ esp_err_t ws_streamer_submit(const ws_streamer_frame_t *frame)
 
     ws_frame_node_t *node = grab_pool_node();
     if (!node) {
+        log_submit_drop_limited(true);
         return ESP_ERR_NO_MEM;
     }
 
@@ -184,6 +215,7 @@ esp_err_t ws_streamer_submit(const ws_streamer_frame_t *frame)
 
     if (xQueueSend(s_queue, &node, 0) != pdPASS) {
         release_pool_node(node);
+        log_submit_drop_limited(false);
         return ESP_ERR_TIMEOUT;
     }
 

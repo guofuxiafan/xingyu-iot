@@ -64,6 +64,8 @@ struct uvc_host_stream_s {
         uvc_stream_bulk_packet_type_t next_bulk_packet; // Bulk only: next expected packet
         bool skip_current_frame;                        // Flag to skip current frame. An error has occurred in the stream
         uint8_t current_frame_id;                       // Frame ID can be only 0 or 1. But we also allow setting it to invalid value = 2.
+        bool frame_pts_valid;                           // Presentation timestamp is available for the current frame
+        uint32_t frame_pts;                             // Presentation timestamp used to reject cross-frame payloads
     } single_thread; // Single thread members are only accessed from 1 thread, so they do not need protection
 
     struct {

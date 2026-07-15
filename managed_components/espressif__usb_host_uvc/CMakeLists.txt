@@ -17,6 +17,6 @@ idf_component_register(SRCS
                         "uvc_bulk.c"
                        INCLUDE_DIRS include
                        PRIV_INCLUDE_DIRS private_include include/esp_private
-                       PRIV_REQUIRES heap
+                       PRIV_REQUIRES heap esp_mm
                        REQUIRES ${requires}
                        )

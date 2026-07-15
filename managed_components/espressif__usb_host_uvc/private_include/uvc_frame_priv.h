@@ -15,6 +15,7 @@ extern "C" {
 
 #define JPEG_MARKER 0xFF
 #define JPEG_SOI    0xD8
+#define JPEG_EOI    0xD9
 
 /**
  * @brief Allocate frame buffers for UVC stream

@@ -86,6 +86,18 @@ static struct uvc_video_core *s_uvc_video_core = NULL;
 
 static int uvc_parent_port_to_slot(uint8_t parent_port_num)
 {
+#if CONFIG_EXAMPLE_USB_HUB_VALIDATION_MODE && \
+    !CONFIG_EXAMPLE_DUAL_USB_NETWORK_VALIDATION_MODE
+    if (parent_port_num == UVC_HOST_PORT_CAMERA1 ||
+            parent_port_num == UVC_HOST_PORT_CAMERA2) {
+        return 0;
+    }
+    return -1;
+#elif CONFIG_EXAMPLE_USB_MINIMAL_VALIDATION_MODE || CONFIG_EXAMPLE_USB_NETWORK_VALIDATION_MODE
+    if (parent_port_num == 0) {
+        return 0;
+    }
+#endif
     if (parent_port_num == UVC_HOST_PORT_CAMERA1) {
         return 0;
     }
@@ -279,7 +291,7 @@ static void uvc_host_driver_event_callback(const uvc_host_driver_event_data_t *e
         portEXIT_CRITICAL(&core->lock);
 
         if (!found_device) {
-            ESP_LOGW(TAG, "Ignore UVC dev_addr=%d on HUB port %d; expected hub port1->cam1 or hub port3->cam2, or slot is already busy",
+            ESP_LOGW(TAG, "Ignore UVC dev_addr=%d on parent port %d; no matching camera slot or slot is busy",
                      event->device_connected.dev_addr, parent_port_num);
             break;
         } else {
@@ -341,7 +353,7 @@ static esp_err_t uvc_video_init(struct esp_video *video)
                         detected_uvc_count++;
                         xSemaphoreGive(assigned->ready_sem);
                     } else {
-                        ESP_LOGW(TAG, "UVC init scan: ignore dev_addr=%d on HUB port %d; expected hub port1->cam1 or hub port3->cam2, or slot is already busy",
+                        ESP_LOGW(TAG, "UVC init scan: ignore dev_addr=%d on parent port %d; no matching camera slot or slot is busy",
                                  dev_addr_list[i], parent_port_num);
                     }
                 }
@@ -352,9 +364,16 @@ static esp_err_t uvc_video_init(struct esp_video *video)
         }
     }
 
-    /* If all expected UVC devices are already detected, no need to wait */
-    if (detected_uvc_count >= core->uvc_video_num) {
-        ESP_LOGI(TAG, "All UVC devices already enumerated (%d/%d)", detected_uvc_count, core->uvc_video_num);
+    /* Readiness is per video node. Another camera being enumerated must not
+     * allow this node to continue with an empty descriptor list. */
+    portENTER_CRITICAL(&core->lock);
+    bool target_ready = device->dev_addr != 0 && device->frame_info_num > 0;
+    portEXIT_CRITICAL(&core->lock);
+
+    if (target_ready) {
+        xSemaphoreTake(device->ready_sem, 0);
+        ESP_LOGI(TAG, "Target UVC device already enumerated: dev_addr=%d frame_info_num=%" PRIu32,
+                 device->dev_addr, device->frame_info_num);
     } else {
         ESP_LOGI(TAG, "Waiting for UVC device to be enumerated... detected=%d expected=%d",
                  detected_uvc_count, core->uvc_video_num);
@@ -363,6 +382,8 @@ static esp_err_t uvc_video_init(struct esp_video *video)
     }
 
     ESP_GOTO_ON_FALSE(device->dev_addr, ESP_ERR_NOT_FOUND, fail0, TAG, "UVC device=%p is not connected", device);
+    ESP_GOTO_ON_FALSE(device->frame_info_num > 0, ESP_ERR_INVALID_STATE, fail0,
+                      TAG, "UVC device=%p has no frame descriptors", device);
 
     free(device->frame_info);
     device->frame_info = NULL;
@@ -378,8 +399,21 @@ static esp_err_t uvc_video_init(struct esp_video *video)
     memset(device->frame_info_fmt_index, -1, sizeof(uint8_t) * device->frame_info_num);
 
     size_t list_size = device->frame_info_num;
-    ESP_GOTO_ON_ERROR(uvc_host_get_frame_list(device->dev_addr, device->stream_index, (uvc_host_frame_info_t (*)[1])device->frame_info, &list_size),
-                      fail1, TAG, "Failed to get frame info");
+    ret = uvc_host_get_frame_list(device->dev_addr, device->stream_index,
+                                  (uvc_host_frame_info_t (*)[1])device->frame_info,
+                                  &list_size);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to get frame info for dev_addr=%d: %s",
+                 device->dev_addr, esp_err_to_name(ret));
+        portENTER_CRITICAL(&core->lock);
+        device->dev_addr = 0;
+        device->parent_port_num = 0;
+        device->stream_index = 0;
+        device->frame_info_num = 0;
+        portEXIT_CRITICAL(&core->lock);
+        xSemaphoreTake(device->ready_sem, 0);
+        goto fail1;
+    }
 
 #if 1
     for (int i = 0; i < device->frame_info_num; i++) {
@@ -481,7 +515,6 @@ fail1:
     device->frame_info = NULL;
     device->frame_info_fmt_index = NULL;
 fail0:
-    xSemaphoreGive(device->ready_sem);
     return ret;
 }
 
@@ -596,9 +629,6 @@ static esp_err_t uvc_video_deinit(struct esp_video *video)
     free(device->frame_info);
     device->frame_info = NULL;
     device->frame_info_fmt_index = NULL;
-    device->frame_info_num = 0;
-
-    xSemaphoreGive(device->ready_sem);
 
     return ESP_OK;
 }

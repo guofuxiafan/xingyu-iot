@@ -51,6 +51,13 @@ if CAMERA_OV5647
             help
                 RAW10 color format at 1280x960 resolution (SXGA) with 45fps framerate.
                 Requires MIPI CSI-2 2-lane interface with 24MHz input clock.
+
+        config CAMERA_OV5647_MIPI_RAW10_1280X960_BINNING_15FPS
+            bool "MIPI 2-lane, 24M input, 1280x960 Binning 15fps, RAW10"
+            default n
+            help
+                RAW10 color format at 1280x960 resolution (SXGA) with 15fps framerate.
+                Requires MIPI CSI-2 2-lane interface with 24MHz input clock.
     endmenu
 
     choice CAMERA_OV5647_MIPI_DEFAULT_FMT
@@ -81,6 +88,10 @@ if CAMERA_OV5647
         config CAMERA_OV5647_MIPI_DEFAULT_FMT_RAW10_1280X960_BINNING_45FPS
             bool "MIPI 2-lane, 24M input, 1280x960 Binning 45fps, RAW10"
             depends on CAMERA_OV5647_MIPI_RAW10_1280X960_BINNING_45FPS
+
+        config CAMERA_OV5647_MIPI_DEFAULT_FMT_RAW10_1280X960_BINNING_15FPS
+            bool "MIPI 2-lane, 24M input, 1280x960 Binning 15fps, RAW10"
+            depends on CAMERA_OV5647_MIPI_RAW10_1280X960_BINNING_15FPS
     endchoice # CAMERA_OV5647_MIPI_DEFAULT_FMT
 
     config CAMERA_OV5647_MIPI_IF_FORMAT_INDEX_DEFAULT
@@ -90,6 +101,7 @@ if CAMERA_OV5647
         default 2 if CAMERA_OV5647_MIPI_DEFAULT_FMT_RAW8_800X800_50FPS
         default 3 if CAMERA_OV5647_MIPI_DEFAULT_FMT_RAW10_1920X1080_30FPS
         default 4 if CAMERA_OV5647_MIPI_DEFAULT_FMT_RAW10_1280X960_BINNING_45FPS
+        default 5 if CAMERA_OV5647_MIPI_DEFAULT_FMT_RAW10_1280X960_BINNING_15FPS
         help
             Sets the default configuration for the MIPI CSI interface.
             Use query_support_formats() API to get more format options.
