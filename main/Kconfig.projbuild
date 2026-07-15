@@ -5,7 +5,7 @@ menu "Example Configuration"
         default 2
         help
             Number of video buffers for the camera sensor.
-            
+
             More buffers provide better performance and reduce frame drops,
             but consume more memory. Recommended range: 2-4 buffers.
             
@@ -31,16 +31,6 @@ menu "Example Configuration"
 
             Recommended: 80 for balanced quality and performance.
 
-    config EXAMPLE_HTTP_PART_BOUNDARY
-        string "HTTP part boundary"
-        default "123456789000000000000987654321"
-        help
-            HTTP multipart boundary string used for MJPEG streaming.
-            
-            This boundary separates different parts in the HTTP multipart response.
-            Must be unique and not appear in the video data. The default value
-            is designed to be unique and safe for most applications.
-    
     config EXAMPLE_MDNS_INSTANCE
         string "mDNS instance"
         default "web-cam"
@@ -61,46 +51,53 @@ menu "Example Configuration"
             accessed as "esp-web.local" on the local network (if mDNS is supported
             by the client device).
 
-    config EXAMPLE_ENABLE_MIPI_CSI_CROP
-        bool "Enable crop for MIPI-CSI video device"
-        default n
-        depends on EXAMPLE_ENABLE_MIPI_CSI_CAM_SENSOR && SOC_ISP_CROP_SUPPORTED
-    
-    if EXAMPLE_ENABLE_MIPI_CSI_CROP
-        config EXAMPLE_MIPI_CSI_CROP_TOP_LEFT_H
-            int "Crop region top-left horizontal coordinate"
-            default 0
-            help
-                Horizontal coordinate of the top-left corner for the crop.
-                Must be an even number and less than bottom-right horizontal coordinate.
+endmenu
 
-        config EXAMPLE_MIPI_CSI_CROP_TOP_LEFT_V
-            int "Crop region top-left vertical coordinate"
-            default 0
-            help
-                Vertical coordinate of the top-left corner for the crop.
-                Must be an even number and less than bottom-right vertical coordinate.
+menu "Provisioning Configuration"
 
-        config EXAMPLE_MIPI_CSI_CROP_WIDTH
-            int "Crop region width"
-            default 640
-            help
-                Width of the crop region in pixels.
-                Must be greater than 0 and not exceed the sensor output width.
-
-        config EXAMPLE_MIPI_CSI_CROP_HEIGHT
-            int "Crop region height"
-            default 480
-            help
-                Height of the crop region in pixels.
-                Must be greater than 0 and not exceed the sensor output height.
-    endif
-
-    config EXAMPLE_WEBSOCKET_URL
-        string "WebSocket server URL"
-        default "ws://192.168.1.100:8765"
+    config EXAMPLE_PROVISION_LONG_PRESS_MS
+        int "Long-press duration (ms)"
+        default 3000
+        range 1000 10000
         help
-            WebSocket server URL for sending video frames with timestamps.
-            Format: ws://<PC_IP>:8765
+            Duration in milliseconds that the BOOT button (GPIO35) must be held
+            continuously to trigger a factory reset and enter AP provisioning mode.
+
+            Shorter values make it easier to trigger accidentally.
+            Longer values prevent accidental triggers.
+
+    config EXAMPLE_PROVISION_AP_TIMEOUT_MS
+        int "AP provisioning mode watchdog (ms)"
+        default 300000
+        range 60000 3600000
+        help
+            If no client connects to the SoftAP within this duration,
+            a warning is logged. The AP stays active indefinitely
+            so provisioning can still complete at any time.
+
+    config EXAMPLE_PROVISION_STA_MAX_RETRY
+        int "STA connection retries before fallback to AP"
+        default 5
+        range 1 20
+        help
+            Number of STA connection attempts before giving up and
+            falling back to AP provisioning mode.
+
+    config EXAMPLE_PROVISION_AP_SSID_PREFIX
+        string "SoftAP SSID prefix for provisioning"
+        default "ESP-CAM-PROV-"
+        help
+            Prefix for the SoftAP SSID during provisioning mode.
+            The last 3 bytes of the AP MAC address are appended to
+            create a unique SSID (e.g., ESP-CAM-PROV-1A2B3C).
+
+    config EXAMPLE_PROVISION_BUTTON_GPIO
+        int "GPIO for long-press provisioning button"
+        default 35
+        range 0 54
+        help
+            GPIO pin number for the long-press provisioning button.
+            Default is GPIO35, the BOOT button on the Waveshare
+            ESP32-P4-WIFI6-DEV-KIT board.
 
 endmenu

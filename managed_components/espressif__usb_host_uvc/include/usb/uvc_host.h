@@ -75,6 +75,7 @@ typedef struct {
     union {
         struct {
             uint8_t dev_addr;             /*!< USB device address. */
+            uint8_t parent_port_num;      /*!< Parent HUB port number. 0 means root port. */
             uint8_t uvc_stream_index;     /*!< Index of UVC function for this uvc stream. */
             size_t frame_info_num;        /*!< Number of entries available from uvc_host_get_frame_list(). */
         } device_connected;               /*!< Data for UVC_HOST_DRIVER_EVENT_DEVICE_CONNECTED. */
@@ -393,6 +394,19 @@ esp_err_t uvc_host_get_frame_list(uint8_t dev_addr,
                                   uint8_t uvc_stream_index,
                                   uvc_host_frame_info_t (*frame_info_list)[],
                                   size_t *list_size);
+
+/**
+ * @brief Get parent HUB port for a connected USB device.
+ *
+ * @param[in] dev_addr USB device address.
+ * @param[out] parent_port_num Parent HUB port number. 0 means root port.
+ *
+ * @return
+ *   - ESP_OK: Parent port obtained successfully.
+ *   - ESP_ERR_INVALID_ARG: Invalid argument.
+ *   - ESP_FAIL: Device could not be opened or queried.
+ */
+esp_err_t uvc_host_get_device_parent_port(uint8_t dev_addr, uint8_t *parent_port_num);
 
 #ifdef __cplusplus
 }

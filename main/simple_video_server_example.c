@@ -4,43 +4,38 @@
  * SPDX-License-Identifier: ESPRESSIF MIT
  */
 
+#include <inttypes.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <fcntl.h>
-#include <sys/ioctl.h>
-#include <sys/mman.h>
-#include <sys/param.h>
-#include <sys/errno.h>
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/semphr.h"
+#include "freertos/task.h"
 #include "cJSON.h"
-#include "esp_event.h"
+#include "esp_check.h"
 #include "esp_err.h"
-#include "esp_check.h"
-#include "esp_log.h"
-#include "esp_timer.h"
-#include "nvs_flash.h"
-#include "esp_check.h"
+#include "esp_event.h"
 #include "esp_http_server.h"
-#include "protocol_examples_common.h"
-#include "mdns.h"
-#include "lwip/inet.h"
+#include "esp_log.h"
+#include "esp_netif.h"
+#include "esp_system.h"
+#include "esp_video_device.h"
 #include "lwip/apps/netbiosns.h"
-#include "esp_websocket_client.h"
+#include "mdns.h"
+#include "nvs_flash.h"
+#include "camera_source.h"
 #include "example_video_common.h"
+#include "provisioning_button.h"
+#include "provisioning_manager.h"
+#include "remote_log.h"
+#include "sta_connect.h"
+#include "wifi_cred_store.h"
+#include "ws_streamer.h"
 
-#define EXAMPLE_CAMERA_VIDEO_BUFFER_NUMBER  CONFIG_EXAMPLE_CAMERA_VIDEO_BUFFER_NUMBER
-
-#define EXAMPLE_JPEG_ENC_QUALITY            CONFIG_EXAMPLE_JPEG_COMPRESSION_QUALITY
-
-#define EXAMPLE_MDNS_INSTANCE               CONFIG_EXAMPLE_MDNS_INSTANCE
-#define EXAMPLE_MDNS_HOST_NAME              CONFIG_EXAMPLE_MDNS_HOST_NAME
-
-#define EXAMPLE_PART_BOUNDARY               CONFIG_EXAMPLE_HTTP_PART_BOUNDARY
-
-static const char *STREAM_CONTENT_TYPE = "multipart/x-mixed-replace;boundary=" EXAMPLE_PART_BOUNDARY;
-static const char *STREAM_BOUNDARY = "\r\n--" EXAMPLE_PART_BOUNDARY "\r\n";
-static const char *STREAM_PART = "Content-Type: image/jpeg\r\nContent-Length: %u\r\nX-Timestamp: %d.%06d\r\n\r\n";
+#define EXAMPLE_MDNS_INSTANCE  CONFIG_EXAMPLE_MDNS_INSTANCE
+#define EXAMPLE_MDNS_HOST_NAME CONFIG_EXAMPLE_MDNS_HOST_NAME
+#define CSI_JPEG_QUALITY       CONFIG_EXAMPLE_JPEG_COMPRESSION_QUALITY
+#define USB_JPEG_QUALITY       70
 
 extern const uint8_t index_html_gz_start[] asm("_binary_index_html_gz_start");
 extern const uint8_t index_html_gz_end[] asm("_binary_index_html_gz_end");
@@ -53,192 +48,75 @@ extern const uint8_t assets_index_js_gz_end[] asm("_binary_index_js_gz_end");
 extern const uint8_t assets_index_css_gz_start[] asm("_binary_index_css_gz_start");
 extern const uint8_t assets_index_css_gz_end[] asm("_binary_index_css_gz_end");
 
-/**
- * @brief Web cam control structure
- */
-typedef struct web_cam_video {
-    int fd;
-    uint8_t index;
+static const char *TAG = "camera_app";
+static camera_source_t *s_sources[CAMERA_SOURCE_COUNT_MAX];
+static uint8_t s_source_count;
 
-    example_encoder_handle_t encoder_handle;
-    uint8_t *jpeg_out_buf;
-    uint32_t jpeg_out_size;
-
-    uint8_t *buffer[EXAMPLE_CAMERA_VIDEO_BUFFER_NUMBER];
-    uint32_t buffer_size;
-
-    uint32_t width;
-    uint32_t height;
-    uint32_t pixel_format;
-    uint8_t jpeg_quality;
-
-    uint32_t frame_rate;
-
-    SemaphoreHandle_t sem;
-
-    uint32_t support_control_jpeg_quality   : 1;
-} web_cam_video_t;
-
-typedef struct web_cam {
-    uint8_t video_count;
-    web_cam_video_t video[0];
-} web_cam_t;
-
-typedef struct web_cam_video_config {
-    const char *dev_name;
-    uint32_t buffer_count;
-} web_cam_video_config_t;
-
-typedef struct request_desc {
-    int index;
-} request_desc_t;
-
-static const char *TAG = "example";
-static esp_websocket_client_handle_t ws_client;
-static const char *WS_URL = CONFIG_EXAMPLE_WEBSOCKET_URL;
-
-static bool is_valid_web_cam(web_cam_video_t *video)
+static esp_err_t camera_frame_cb(const camera_source_frame_t *frame, void *user_ctx)
 {
-    return video->fd != -1;
+    (void)user_ctx;
+
+    ws_streamer_frame_t ws_frame = {
+        .camera_id = frame->camera_id,
+        .timestamp_ms = frame->timestamp_ms,
+        .jpeg_data = frame->jpeg_data,
+        .jpeg_len = frame->jpeg_len,
+    };
+    return ws_streamer_submit(&ws_frame);
 }
 
-static esp_err_t decode_request(web_cam_t *web_cam, httpd_req_t *req, request_desc_t *desc)
-{
-    esp_err_t ret;
-    int index = -1;
-    char buffer[32];
-
-    if ((ret = httpd_req_get_url_query_str(req, buffer, sizeof(buffer))) != ESP_OK) {
-        return ret;
-    }
-    ESP_LOGD(TAG, "source: %s", buffer);
-
-    for (int i = 0; i < web_cam->video_count; i++) {
-        char source_str[16];
-
-        if (snprintf(source_str, sizeof(source_str), "source=%d", i) <= 0) {
-            return ESP_FAIL;
-        }
-
-        if (strcmp(buffer, source_str) == 0) {
-            index = i;
-            break;
-        }
-    }
-    if (index == -1) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    desc->index = index;
-    return ESP_OK;
-}
-
-static esp_err_t capture_video_image(httpd_req_t *req, web_cam_video_t *video, bool is_jpeg)
-{
-    esp_err_t ret;
-    struct v4l2_buffer buf;
-    const char *type_str = is_jpeg ? "JPEG" : "binary";
-    uint32_t jpeg_encoded_size;
-
-    memset(&buf, 0, sizeof(buf));
-    buf.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    buf.memory = V4L2_MEMORY_MMAP;
-    ESP_RETURN_ON_ERROR(ioctl(video->fd, VIDIOC_DQBUF, &buf), TAG, "failed to receive video frame");
-    if (!(buf.flags & V4L2_BUF_FLAG_DONE)) {
-        return ESP_ERR_INVALID_RESPONSE;
-    }
-
-    if (!is_jpeg || video->pixel_format == V4L2_PIX_FMT_JPEG) {
-        /* Directly send the buffer of raw data */
-        ESP_GOTO_ON_ERROR(httpd_resp_send(req, (char *)video->buffer[buf.index], buf.bytesused), fail0, TAG, "failed to send %s", type_str);
-        jpeg_encoded_size = buf.bytesused;
-    } else {
-        ESP_GOTO_ON_FALSE(xSemaphoreTake(video->sem, portMAX_DELAY) == pdPASS, ESP_FAIL, fail0, TAG, "failed to take semaphore");
-        ret = example_encoder_process(video->encoder_handle, video->buffer[buf.index], video->buffer_size,
-                                      video->jpeg_out_buf, video->jpeg_out_size, &jpeg_encoded_size);
-        xSemaphoreGive(video->sem);
-        ESP_GOTO_ON_ERROR(ret, fail0, TAG, "failed to encode video frame");
-        ESP_GOTO_ON_ERROR(httpd_resp_send(req, (char *)video->jpeg_out_buf, jpeg_encoded_size), fail0, TAG, "failed to send %s", type_str);
-    }
-
-    ESP_RETURN_ON_ERROR(ioctl(video->fd, VIDIOC_QBUF, &buf), TAG, "failed to queue video frame");
-
-    ESP_GOTO_ON_ERROR(httpd_resp_sendstr_chunk(req, NULL), fail0, TAG, "failed to send null");
-
-    ESP_LOGD(TAG, "send %s image%d size: %" PRIu32, type_str, video->index, jpeg_encoded_size);
-
-    return ESP_OK;
-
-fail0:
-    ioctl(video->fd, VIDIOC_QBUF, &buf);
-    return ret;
-}
-
-static char *get_cameras_json(web_cam_t *web_cam)
+static char *get_cameras_json(void)
 {
     cJSON *root = cJSON_CreateObject();
     cJSON *cameras = cJSON_CreateArray();
+    if (!root || !cameras) {
+        cJSON_Delete(root);
+        cJSON_Delete(cameras);
+        return NULL;
+    }
     cJSON_AddItemToObject(root, "cameras", cameras);
 
-    for (int i = 0; i < web_cam->video_count; i++) {
-        char src_str[32];
-
-        if (!is_valid_web_cam(&web_cam->video[i])) {
+    for (int i = 0; i < s_source_count; i++) {
+        camera_source_info_t info;
+        camera_source_get_info(s_sources[i], &info);
+        if (!info.active) {
             continue;
         }
 
+        char text[48];
         cJSON *camera = cJSON_CreateObject();
-        cJSON_AddNumberToObject(camera, "index", i);
-        assert(snprintf(src_str, sizeof(src_str), ":%d/stream", i + 81) > 0);
-        cJSON_AddStringToObject(camera, "src", src_str);
-        cJSON_AddNumberToObject(camera, "currentFrameRate", web_cam->video[i].frame_rate);
+        cJSON_AddNumberToObject(camera, "index", info.camera_id);
+        cJSON_AddStringToObject(camera, "src", "");
+        cJSON_AddBoolToObject(camera, "websocketOnly", true);
+        cJSON_AddNumberToObject(camera, "currentFrameRate", info.frame_rate);
         cJSON_AddNumberToObject(camera, "currentImageFormat", 0);
-        assert(snprintf(src_str, sizeof(src_str), "JPEG %" PRIu32 "x%" PRIu32, web_cam->video[i].width, web_cam->video[i].height) > 0);
-        cJSON_AddStringToObject(camera, "currentImageFormatDescription", src_str);
 
-        if (web_cam->video[i].support_control_jpeg_quality) {
-            cJSON_AddNumberToObject(camera, "currentQuality", web_cam->video[i].jpeg_quality);
-        }
+        snprintf(text, sizeof(text), "JPEG %" PRIu32 "x%" PRIu32, info.width, info.height);
+        cJSON_AddStringToObject(camera, "currentImageFormatDescription", text);
 
         cJSON *current_resolution = cJSON_CreateObject();
-        cJSON_AddNumberToObject(current_resolution, "width", web_cam->video[i].width);
-        cJSON_AddNumberToObject(current_resolution, "height", web_cam->video[i].height);
+        cJSON_AddNumberToObject(current_resolution, "width", info.width);
+        cJSON_AddNumberToObject(current_resolution, "height", info.height);
         cJSON_AddItemToObject(camera, "currentResolution", current_resolution);
 
         cJSON *image_formats = cJSON_CreateArray();
         cJSON *image_format = cJSON_CreateObject();
         cJSON_AddNumberToObject(image_format, "id", 0);
-        assert(snprintf(src_str, sizeof(src_str), "JPEG %" PRIu32 "x%" PRIu32, web_cam->video[i].width, web_cam->video[i].height) > 0);
-        cJSON_AddStringToObject(image_format, "description", src_str);
+        cJSON_AddStringToObject(image_format, "description", text);
+        if (info.quality_supported) {
+            cJSON_AddNumberToObject(camera, "currentQuality", info.jpeg_quality);
 
-        if (web_cam->video[i].support_control_jpeg_quality) {
-            cJSON *image_format_quality = cJSON_CreateObject();
-
-            int min_quality = 1;
-            int max_quality = 100;
-            int step_quality = 1;
-            int default_quality = EXAMPLE_JPEG_ENC_QUALITY;
-            if (web_cam->video[i].pixel_format == V4L2_PIX_FMT_JPEG) {
-                struct v4l2_query_ext_ctrl qctrl = {0};
-
-                qctrl.id = V4L2_CID_JPEG_COMPRESSION_QUALITY;
-                if (ioctl(web_cam->video[i].fd, VIDIOC_QUERY_EXT_CTRL, &qctrl) == 0) {
-                    min_quality = qctrl.minimum;
-                    max_quality = qctrl.maximum;
-                    step_quality = qctrl.step;
-                    default_quality = qctrl.default_value;
-                }
-            }
-
-            cJSON_AddNumberToObject(image_format_quality, "min", min_quality);
-            cJSON_AddNumberToObject(image_format_quality, "max", max_quality);
-            cJSON_AddNumberToObject(image_format_quality, "step", step_quality);
-            cJSON_AddNumberToObject(image_format_quality, "default", default_quality);
-            cJSON_AddItemToObject(image_format, "quality", image_format_quality);
+            cJSON *quality = cJSON_CreateObject();
+            cJSON_AddNumberToObject(quality, "min", 1);
+            cJSON_AddNumberToObject(quality, "max", 100);
+            cJSON_AddNumberToObject(quality, "step", 1);
+            cJSON_AddNumberToObject(quality, "default", info.kind == CAMERA_SOURCE_KIND_USB_UVC ? USB_JPEG_QUALITY : CSI_JPEG_QUALITY);
+            cJSON_AddItemToObject(image_format, "quality", quality);
         }
         cJSON_AddItemToArray(image_formats, image_format);
-
         cJSON_AddItemToObject(camera, "imageFormats", image_formats);
+
+        cJSON_AddStringToObject(camera, "sourceType", info.kind == CAMERA_SOURCE_KIND_USB_UVC ? "usb_uvc" : "csi");
         cJSON_AddItemToArray(cameras, camera);
     }
 
@@ -247,121 +125,62 @@ static char *get_cameras_json(web_cam_t *web_cam)
     return output;
 }
 
-static esp_err_t set_camera_jpeg_quality(web_cam_video_t *video, int quality)
-{
-    esp_err_t ret = ESP_OK;
-    int quality_reset = quality;
-
-    if (video->pixel_format == V4L2_PIX_FMT_JPEG) {
-        struct v4l2_ext_controls controls = {0};
-        struct v4l2_ext_control control[1];
-        struct v4l2_query_ext_ctrl qctrl = {0};
-
-        qctrl.id = V4L2_CID_JPEG_COMPRESSION_QUALITY;
-        if (ioctl(video->fd, VIDIOC_QUERY_EXT_CTRL, &qctrl) == 0) {
-            if ((quality > qctrl.maximum) || (quality < qctrl.minimum) ||
-                    (((quality - qctrl.minimum) % qctrl.step) != 0)) {
-
-                if (quality > qctrl.maximum) {
-                    quality_reset = qctrl.maximum;
-                } else if (quality < qctrl.minimum) {
-                    quality_reset = qctrl.minimum;
-                } else {
-                    quality_reset = qctrl.minimum + ((quality - qctrl.minimum) / qctrl.step) * qctrl.step;
-                }
-
-                ESP_LOGW(TAG, "video%d: JPEG compression quality=%d is out of sensor's range, reset to %d", video->index, quality, quality_reset);
-            }
-
-            controls.ctrl_class = V4L2_CID_JPEG_CLASS;
-            controls.count = 1;
-            controls.controls = control;
-            control[0].id = V4L2_CID_JPEG_COMPRESSION_QUALITY;
-            control[0].value = quality_reset;
-            ESP_RETURN_ON_ERROR(ioctl(video->fd, VIDIOC_S_EXT_CTRLS, &controls), TAG, "failed to set jpeg compression quality");
-
-            video->jpeg_quality = quality_reset;
-            video->support_control_jpeg_quality = 1;
-        } else {
-            video->support_control_jpeg_quality = 0;
-            ESP_LOGW(TAG, "video%d: JPEG compression quality control is not supported", video->index);
-        }
-    } else {
-        ESP_RETURN_ON_ERROR(example_encoder_set_jpeg_quality(video->encoder_handle, quality_reset), TAG, "failed to set jpeg quality");
-        video->jpeg_quality = quality_reset;
-    }
-
-    if (video->support_control_jpeg_quality) {
-        ESP_LOGI(TAG, "video%d: set jpeg quality %d success", video->index, quality_reset);
-    }
-
-    return ret;
-}
-
 static esp_err_t camera_info_handler(httpd_req_t *req)
 {
-    esp_err_t ret;
-    web_cam_t *web_cam = (web_cam_t *)req->user_ctx;
-    char *output = get_cameras_json(web_cam);
+    char *output = get_cameras_json();
+    ESP_RETURN_ON_FALSE(output, ESP_ERR_NO_MEM, TAG, "failed to render camera JSON");
 
     httpd_resp_set_type(req, "application/json");
-    ret = httpd_resp_sendstr(req, output);
+    esp_err_t ret = httpd_resp_sendstr(req, output);
     free(output);
-
     return ret;
 }
 
 static esp_err_t camera_settings_handler(httpd_req_t *req)
 {
-    esp_err_t ret;
-    char *content;
-    web_cam_t *web_cam = (web_cam_t *)req->user_ctx;
+    esp_err_t ret = ESP_FAIL;
+    cJSON *root = NULL;
+    char *content = calloc(1, req->content_len + 1);
+    ESP_RETURN_ON_FALSE(content, ESP_ERR_NO_MEM, TAG, "failed to allocate request body");
 
-    content = (char *)calloc(1, req->content_len + 1);
-    ESP_RETURN_ON_FALSE(content, ESP_ERR_NO_MEM, TAG, "failed to allocate memory");
-
-    ESP_GOTO_ON_FALSE(httpd_req_recv(req, content, req->content_len) > 0, ESP_FAIL, fail0, TAG, "failed to recv content");
-    ESP_LOGD(TAG, "content: %s", content);
-
-    cJSON *json_root = cJSON_Parse(content);
-    free(content);
-    content = NULL;
-    ESP_GOTO_ON_FALSE(json_root, ESP_FAIL, fail0, TAG, "failed to parse JSON");
-
-    cJSON *json_index = cJSON_GetObjectItem(json_root, "index");
-    ESP_GOTO_ON_FALSE(json_index && cJSON_IsNumber(json_index), ESP_ERR_INVALID_ARG, fail1, TAG, "missing or invalid index field");
-    int index = json_index->valueint;
-    ESP_GOTO_ON_FALSE(index >= 0 && index < web_cam->video_count && is_valid_web_cam(&web_cam->video[index]), ESP_ERR_INVALID_ARG, fail1, TAG, "invalid index");
-
-    cJSON *json_image_format = cJSON_GetObjectItem(json_root, "image_format");
-    ESP_GOTO_ON_FALSE(json_image_format && cJSON_IsNumber(json_image_format), ESP_ERR_INVALID_ARG, fail1, TAG, "missing or invalid image_format field");
-    int image_format = json_image_format->valueint;
-
-    cJSON *json_jpeg_quality = cJSON_GetObjectItem(json_root, "jpeg_quality");
-    ESP_GOTO_ON_FALSE(json_jpeg_quality && cJSON_IsNumber(json_jpeg_quality), ESP_ERR_INVALID_ARG, fail1, TAG, "missing or invalid jpeg_quality field");
-    int jpeg_quality = json_jpeg_quality->valueint;
-
-    ESP_LOGI(TAG, "JSON parse success - index:%d, image_format:%d, jpeg_quality:%d", index, image_format, jpeg_quality);
-    cJSON_Delete(json_root);
-    json_root = NULL;
-
-    ESP_GOTO_ON_ERROR(set_camera_jpeg_quality(&web_cam->video[index], jpeg_quality), fail1, TAG, "failed to set camera jpeg quality");
-
-    httpd_resp_sendstr(req, "OK");
-    return ESP_OK;
-
-fail1:
-    if (json_root) {
-        cJSON_Delete(json_root);
+    int received = httpd_req_recv(req, content, req->content_len);
+    if (received <= 0) {
+        ret = received;
+        ESP_LOGE(TAG, "failed to receive request body");
+        goto fail;
     }
-fail0:
+
+    root = cJSON_Parse(content);
+    ESP_GOTO_ON_FALSE(root, ESP_ERR_INVALID_ARG, fail, TAG, "failed to parse JSON");
+
+    cJSON *json_index = cJSON_GetObjectItem(root, "index");
+    cJSON *json_quality = cJSON_GetObjectItem(root, "jpeg_quality");
+    ESP_GOTO_ON_FALSE(json_index && cJSON_IsNumber(json_index), ESP_ERR_INVALID_ARG, cleanup_json, TAG, "missing index");
+    ESP_GOTO_ON_FALSE(json_quality && cJSON_IsNumber(json_quality), ESP_ERR_INVALID_ARG, cleanup_json, TAG, "missing jpeg_quality");
+
+    int index = json_index->valueint;
+    ESP_GOTO_ON_FALSE(index >= 0 && index < s_source_count && camera_source_is_active(s_sources[index]),
+                      ESP_ERR_INVALID_ARG, cleanup_json, TAG, "invalid camera index");
+
+    ret = camera_source_set_jpeg_quality(s_sources[index], (uint8_t)json_quality->valueint);
+    if (ret == ESP_ERR_NOT_SUPPORTED) {
+        ESP_LOGW(TAG, "cam%d does not support runtime JPEG quality control", index);
+        ret = ESP_OK;
+    }
+    ESP_GOTO_ON_ERROR(ret, cleanup_json, TAG, "failed to set JPEG quality");
+
+    cJSON_Delete(root);
+    free(content);
+    return httpd_resp_sendstr(req, "OK");
+
+cleanup_json:
+    cJSON_Delete(root);
+fail:
+    free(content);
     if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
         httpd_resp_send_408(req);
     } else {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON format");
-    }
-    if (content) {
-        free(content);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid camera config");
     }
     return ret;
 }
@@ -370,7 +189,6 @@ static esp_err_t static_file_handler(httpd_req_t *req)
 {
     const char *uri = req->uri;
 
-    /* Route to appropriate static file based on URI */
     if (strcmp(uri, "/") == 0) {
         httpd_resp_set_type(req, "text/html");
         httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
@@ -393,437 +211,101 @@ static esp_err_t static_file_handler(httpd_req_t *req)
         return httpd_resp_send(req, (const char *)assets_index_css_gz_start, assets_index_css_gz_end - assets_index_css_gz_start);
     }
 
-    /* If no static file matches, return 404 */
-    ESP_LOGW(TAG, "File not found: %s", uri);
     httpd_resp_send_404(req);
     return ESP_FAIL;
 }
 
-static void ws_init(void)
+static esp_err_t http_server_init(void)
 {
-    esp_websocket_client_config_t ws_cfg = {
-        .uri = WS_URL,
-        .reconnect_timeout_ms = 5000,
-        .network_timeout_ms = 5000,
-        .disable_auto_reconnect = false,
-    };
-    ws_client = esp_websocket_client_init(&ws_cfg);
-    ESP_LOGI(TAG, "WebSocket connecting to %s", WS_URL);
-    esp_websocket_client_start(ws_client);
-}
-
-static void ws_send_frame(uint8_t camera_id, uint8_t *jpeg_data, size_t jpeg_len)
-{
-    if (ws_client == NULL) {
-        return;
-    }
-
-    int64_t now_us = esp_timer_get_time();
-    uint64_t timestamp_ms = (uint64_t)(now_us / 1000);
-
-    uint8_t header[11];
-    // timestamp_ms: 8 bytes little-endian
-    header[0] = (timestamp_ms >> 0) & 0xFF;
-    header[1] = (timestamp_ms >> 8) & 0xFF;
-    header[2] = (timestamp_ms >> 16) & 0xFF;
-    header[3] = (timestamp_ms >> 24) & 0xFF;
-    header[4] = (timestamp_ms >> 32) & 0xFF;
-    header[5] = (timestamp_ms >> 40) & 0xFF;
-    header[6] = (timestamp_ms >> 48) & 0xFF;
-    header[7] = (timestamp_ms >> 56) & 0xFF;
-    header[8] = camera_id;
-    header[9] = (jpeg_len >> 8) & 0xFF;    // data_len big-endian
-    header[10] = jpeg_len & 0xFF;
-
-    uint8_t *frame = malloc(11 + jpeg_len);
-    if (frame == NULL) {
-        ESP_LOGE(TAG, "failed to allocate frame buffer");
-        return;
-    }
-    memcpy(frame, header, 11);
-    memcpy(frame + 11, jpeg_data, jpeg_len);
-
-    esp_websocket_client_send_bin(ws_client, (const char *)frame, 11 + jpeg_len, pdMS_TO_TICKS(100));
-    free(frame);
-}
-
-static esp_err_t image_stream_handler(httpd_req_t *req)
-{
-    esp_err_t ret;
-    struct v4l2_buffer buf;
-    bool locked = false;
-    web_cam_video_t *video = (web_cam_video_t *)req->user_ctx;
-
-    while (1) {
-        uint32_t jpeg_encoded_size;
-
-        locked = false;
-
-        memset(&buf, 0, sizeof(buf));
-        buf.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        buf.memory = V4L2_MEMORY_MMAP;
-        ESP_RETURN_ON_ERROR(ioctl(video->fd, VIDIOC_DQBUF, &buf), TAG, "failed to receive video frame");
-        if (!(buf.flags & V4L2_BUF_FLAG_DONE)) {
-            ESP_RETURN_ON_ERROR(ioctl(video->fd, VIDIOC_QBUF, &buf), TAG, "failed to queue video frame");
-            continue;
-        }
-
-        if (video->pixel_format == V4L2_PIX_FMT_JPEG) {
-            video->jpeg_out_buf = video->buffer[buf.index];
-            jpeg_encoded_size = buf.bytesused;
-        } else {
-            ESP_GOTO_ON_FALSE(xSemaphoreTake(video->sem, portMAX_DELAY) == pdPASS, ESP_FAIL, fail0, TAG, "failed to take semaphore");
-            locked = true;
-
-            ESP_GOTO_ON_ERROR(example_encoder_process(video->encoder_handle, video->buffer[buf.index], video->buffer_size,
-                              video->jpeg_out_buf, video->jpeg_out_size, &jpeg_encoded_size),
-                              fail0, TAG, "failed to encode video frame");
-        }
-
-        ws_send_frame(video->index, video->jpeg_out_buf, jpeg_encoded_size);
-        if (locked) {
-            xSemaphoreGive(video->sem);
-            locked = false;
-        }
-
-        ESP_RETURN_ON_ERROR(ioctl(video->fd, VIDIOC_QBUF, &buf), TAG, "failed to queue video frame");
-        /* Frame rate throttle: limit to ~10fps to reduce WiFi bandwidth */
-        vTaskDelay(pdMS_TO_TICKS(100));
-    }
-
-    return ESP_OK;
-
-fail0:
-    if (locked) {
-        xSemaphoreGive(video->sem);
-    }
-    ioctl(video->fd, VIDIOC_QBUF, &buf);
-    return ret;
-}
-
-static esp_err_t capture_image_handler(httpd_req_t *req)
-{
-    web_cam_t *web_cam = (web_cam_t *)req->user_ctx;
-
-    request_desc_t desc;
-    ESP_RETURN_ON_ERROR(decode_request(web_cam, req, &desc), TAG, "failed to decode request");
-
-    char type_ptr[32];
-    ESP_RETURN_ON_FALSE(snprintf(type_ptr, sizeof(type_ptr), "image/jpeg;name=image%d.jpg", desc.index) > 0, ESP_FAIL, TAG, "failed to format buffer");
-    ESP_RETURN_ON_ERROR(httpd_resp_set_type(req, type_ptr), TAG, "failed to set content type");
-
-    return capture_video_image(req, &web_cam->video[desc.index], true);
-}
-
-static esp_err_t capture_binary_handler(httpd_req_t *req)
-{
-    web_cam_t *web_cam = (web_cam_t *)req->user_ctx;
-
-    request_desc_t desc;
-    ESP_RETURN_ON_ERROR(decode_request(web_cam, req, &desc), TAG, "failed to decode request");
-
-    char type_ptr[56];
-    ESP_RETURN_ON_FALSE(snprintf(type_ptr, sizeof(type_ptr), "application/octet-stream;name=image_binary%d.bin", desc.index) > 0, ESP_FAIL, TAG, "failed to format buffer");
-    ESP_RETURN_ON_ERROR(httpd_resp_set_type(req, type_ptr), TAG, "failed to set content type");
-
-    return capture_video_image(req, &web_cam->video[desc.index], false);
-}
-
-static esp_err_t init_web_cam_video(web_cam_video_t *video, const web_cam_video_config_t *config, int index)
-{
-    int fd;
-    int ret;
-    struct v4l2_format format;
-    struct v4l2_streamparm sparm;
-    struct v4l2_requestbuffers req;
-    struct v4l2_captureparm *cparam = &sparm.parm.capture;
-    struct v4l2_fract *timeperframe = &cparam->timeperframe;
-
-    fd = open(config->dev_name, O_RDWR);
-    ESP_RETURN_ON_FALSE(fd >= 0, ESP_ERR_NOT_FOUND, TAG, "Open video device %s failed", config->dev_name);
-
-    memset(&format, 0, sizeof(struct v4l2_format));
-    format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    ESP_GOTO_ON_ERROR(ioctl(fd, VIDIOC_G_FMT, &format), fail0, TAG, "Failed get fmt from %s", config->dev_name);
-
-#if CONFIG_EXAMPLE_SELECT_JPEG_HW_DRIVER
-    if (format.fmt.pix.pixelformat == V4L2_PIX_FMT_RGB565X) {
-#if CONFIG_ESP_VIDEO_ENABLE_SWAP_BYTE
-        ESP_LOGW(TAG, "The hardware JPEG encoder does not support RGB565 big endian. Instead, use RGB565 little endian by enabling the byte swap function.");
-
-        format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        format.fmt.pix.pixelformat = V4L2_PIX_FMT_RGB565;
-        ESP_GOTO_ON_ERROR(ioctl(fd, VIDIOC_S_FMT, &format), fail0, TAG, "failed to set fmt to %s", config->dev_name);
-#else
-        ESP_GOTO_ON_ERROR(ESP_FAIL, fail0, TAG, "The hardware JPEG encoder does not support RGB565 big endian. Please enable the byte swap function ESP_VIDEO_ENABLE_SWAP_BYTE in menuconfig.");
-#endif
-    }
-#endif
-
-    memset(&sparm, 0, sizeof(sparm));
-    sparm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    ESP_GOTO_ON_ERROR(ioctl(fd, VIDIOC_G_PARM, &sparm), fail0, TAG, "failed to get frame rate from %s", config->dev_name);
-    video->frame_rate = timeperframe->denominator / timeperframe->numerator;
-
-#if CONFIG_EXAMPLE_ENABLE_MIPI_CSI_CROP
-    /**
-     * Command VIDIOC_S_SELECTION should be called before VIDIOC_REQBUFS.
-     */
-
-    struct v4l2_selection selection;
-
-    memset(&selection, 0, sizeof(selection));
-    selection.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    selection.target = V4L2_SEL_TGT_CROP;
-    selection.r.left = CONFIG_EXAMPLE_MIPI_CSI_CROP_TOP_LEFT_H;
-    selection.r.width = CONFIG_EXAMPLE_MIPI_CSI_CROP_WIDTH;
-    selection.r.top = CONFIG_EXAMPLE_MIPI_CSI_CROP_TOP_LEFT_V;
-    selection.r.height = CONFIG_EXAMPLE_MIPI_CSI_CROP_HEIGHT;
-    if (ioctl(fd, VIDIOC_S_SELECTION, &selection) != 0) {
-        ESP_LOGE(TAG, "failed to set selection");
-    }
-#endif
-
-    memset(&req, 0, sizeof(req));
-    req.count  = EXAMPLE_CAMERA_VIDEO_BUFFER_NUMBER;
-    req.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    req.memory = V4L2_MEMORY_MMAP;
-    ESP_GOTO_ON_ERROR(ioctl(fd, VIDIOC_REQBUFS, &req), fail0, TAG, "failed to req buffers from %s", config->dev_name);
-
-    for (int i = 0; i < EXAMPLE_CAMERA_VIDEO_BUFFER_NUMBER; i++) {
-        struct v4l2_buffer buf;
-
-        memset(&buf, 0, sizeof(buf));
-        buf.type        = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        buf.memory      = V4L2_MEMORY_MMAP;
-        buf.index       = i;
-        ESP_GOTO_ON_ERROR(ioctl(fd, VIDIOC_QUERYBUF, &buf), fail0, TAG, "failed to query vbuf from %s", config->dev_name);
-
-        video->buffer[i] = mmap(NULL, buf.length, PROT_READ | PROT_WRITE, MAP_SHARED, fd, buf.m.offset);
-        ESP_GOTO_ON_FALSE(video->buffer[i] != MAP_FAILED, ESP_ERR_NO_MEM, fail0, TAG, "failed to mmap buffer");
-        video->buffer_size = buf.length;
-
-        ESP_GOTO_ON_ERROR(ioctl(fd, VIDIOC_QBUF, &buf), fail0, TAG, "failed to queue frame vbuf from %s", config->dev_name);
-    }
-
-    video->fd = fd;
-    video->width = format.fmt.pix.width;
-    video->height = format.fmt.pix.height;
-    video->pixel_format = format.fmt.pix.pixelformat;
-    video->jpeg_quality = EXAMPLE_JPEG_ENC_QUALITY;
-
-    if (video->pixel_format == V4L2_PIX_FMT_JPEG) {
-        ESP_GOTO_ON_ERROR(set_camera_jpeg_quality(video, EXAMPLE_JPEG_ENC_QUALITY), fail0, TAG, "failed to set jpeg quality");
-    } else {
-        example_encoder_config_t encoder_config = {0};
-
-        encoder_config.width = video->width;
-        encoder_config.height = video->height;
-        encoder_config.pixel_format = video->pixel_format;
-        encoder_config.quality = EXAMPLE_JPEG_ENC_QUALITY;
-        ESP_GOTO_ON_ERROR(example_encoder_init(&encoder_config, &video->encoder_handle), fail0, TAG, "failed to init encoder");
-
-        ESP_GOTO_ON_ERROR(example_encoder_alloc_output_buffer(video->encoder_handle, &video->jpeg_out_buf, &video->jpeg_out_size),
-                          fail1, TAG, "failed to alloc jpeg output buf");
-
-        video->support_control_jpeg_quality = 1;
-    }
-
-    video->sem = xSemaphoreCreateBinary();
-    ESP_GOTO_ON_FALSE(video->sem, ESP_ERR_NO_MEM, fail2, TAG, "failed to create semaphore");
-    xSemaphoreGive(video->sem);
-
-    return ESP_OK;
-
-fail2:
-    if (video->pixel_format != V4L2_PIX_FMT_JPEG) {
-        example_encoder_free_output_buffer(video->encoder_handle, video->jpeg_out_buf);
-        video->jpeg_out_buf = NULL;
-    }
-fail1:
-    if (video->pixel_format != V4L2_PIX_FMT_JPEG) {
-        example_encoder_deinit(video->encoder_handle);
-        video->encoder_handle = NULL;
-    }
-fail0:
-    close(fd);
-    video->fd = -1;
-    return ret;
-}
-
-static esp_err_t deinit_web_cam_video(web_cam_video_t *video)
-{
-    if (video->sem) {
-        vSemaphoreDelete(video->sem);
-        video->sem = NULL;
-    }
-
-    if (video->pixel_format != V4L2_PIX_FMT_JPEG) {
-        example_encoder_free_output_buffer(video->encoder_handle, video->jpeg_out_buf);
-        example_encoder_deinit(video->encoder_handle);
-    }
-
-    close(video->fd);
-    return ESP_OK;
-}
-
-static esp_err_t new_web_cam(const web_cam_video_config_t *config, int config_count, web_cam_t **ret_wc)
-{
-    int i;
-    web_cam_t *wc;
-    esp_err_t ret = ESP_FAIL;
-    int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-
-    wc = calloc(1, sizeof(web_cam_t) + config_count * sizeof(web_cam_video_t));
-    ESP_RETURN_ON_FALSE(wc, ESP_ERR_NO_MEM, TAG, "failed to alloc web cam");
-    wc->video_count = config_count;
-
-    for (i = 0; i < config_count; i++) {
-        wc->video[i].index = i;
-        wc->video[i].fd = -1;
-
-        ret = init_web_cam_video(&wc->video[i], &config[i], i);
-        if (ret == ESP_ERR_NOT_FOUND) {
-            ESP_LOGW(TAG, "failed to find web_cam %d", i);
-            continue;
-        } else if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "failed to initialize web_cam %d", i);
-            goto fail0;
-        }
-
-        ESP_LOGI(TAG, "video%d: width=%" PRIu32 " height=%" PRIu32 " format=" V4L2_FMT_STR, i, wc->video[i].width,
-                 wc->video[i].height, V4L2_FMT_STR_ARG(wc->video[i].pixel_format));
-    }
-
-    for (i = 0; i < config_count; i++) {
-        if (is_valid_web_cam(&wc->video[i])) {
-            ESP_GOTO_ON_ERROR(ioctl(wc->video[i].fd, VIDIOC_STREAMON, &type), fail1, TAG, "failed to start stream");
-        }
-    }
-
-    *ret_wc = wc;
-
-    return ESP_OK;
-
-fail1:
-    for (int j = i - 1; j >= 0; j--) {
-        if (is_valid_web_cam(&wc->video[j])) {
-            ioctl(wc->video[j].fd, VIDIOC_STREAMOFF, &type);
-        }
-    }
-    i = config_count; // deinit all web_cam
-fail0:
-    for (int j = i - 1; j >= 0; j--) {
-        if (is_valid_web_cam(&wc->video[j])) {
-            deinit_web_cam_video(&wc->video[j]);
-        }
-    }
-    free(wc);
-    return ret;
-}
-
-static void free_web_cam(web_cam_t *web_cam)
-{
-    for (int i = 0; i < web_cam->video_count; i++) {
-        if (is_valid_web_cam(&web_cam->video[i])) {
-            deinit_web_cam_video(&web_cam->video[i]);
-        }
-    }
-    free(web_cam);
-}
-
-static esp_err_t http_server_init(web_cam_t *web_cam)
-{
-    httpd_handle_t stream_httpd;
+    httpd_handle_t httpd;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.uri_match_fn = httpd_uri_match_wildcard;
-
-    /* Unified static file handler for all static resources */
-    httpd_uri_t static_file_uri = {
-        .uri = "/*",
-        .method = HTTP_GET,
-        .handler = static_file_handler,
-        .user_ctx = (void *)web_cam
-    };
-
-    /* API handlers */
-    httpd_uri_t capture_image_uri = {
-        .uri = "/api/capture_image",
-        .method = HTTP_GET,
-        .handler = capture_image_handler,
-        .user_ctx = (void *)web_cam
-    };
-
-    httpd_uri_t capture_binary_uri = {
-        .uri = "/api/capture_binary",
-        .method = HTTP_GET,
-        .handler = capture_binary_handler,
-        .user_ctx = (void *)web_cam
-    };
+    config.stack_size = 1024 * 6;
 
     httpd_uri_t camera_info_uri = {
         .uri = "/api/get_camera_info",
         .method = HTTP_GET,
         .handler = camera_info_handler,
-        .user_ctx = (void *)web_cam
     };
-
     httpd_uri_t camera_settings_uri = {
         .uri = "/api/set_camera_config",
         .method = HTTP_POST,
         .handler = camera_settings_handler,
-        .user_ctx = (void *)web_cam
+    };
+    httpd_uri_t static_file_uri = {
+        .uri = "/*",
+        .method = HTTP_GET,
+        .handler = static_file_handler,
     };
 
-    config.stack_size = 1024 * 6;
-    ESP_LOGI(TAG, "Starting stream server on port: '%d'", config.server_port);
-    if (httpd_start(&stream_httpd, &config) == ESP_OK) {
-        /* Register API handlers (more specific URIs) */
-        httpd_register_uri_handler(stream_httpd, &capture_image_uri);
-        httpd_register_uri_handler(stream_httpd, &capture_binary_uri);
-        httpd_register_uri_handler(stream_httpd, &camera_info_uri);
-        httpd_register_uri_handler(stream_httpd, &camera_settings_uri);
-
-        /* Register wildcard static file handler to catch all other requests */
-        httpd_register_uri_handler(stream_httpd, &static_file_uri);
-    }
-
-    for (int i = 0; i < web_cam->video_count; i++) {
-        if (!is_valid_web_cam(&web_cam->video[i])) {
-            continue;
-        }
-
-        httpd_uri_t stream_0_uri = {
-            .uri = "/stream",
-            .method = HTTP_GET,
-            .handler = image_stream_handler,
-            .user_ctx = (void *) &web_cam->video[i]
-        };
-
-        config.stack_size = 1024 * 6;
-        config.server_port += 1;
-        config.ctrl_port += 1;
-        if (httpd_start(&stream_httpd, &config) == ESP_OK) {
-            httpd_register_uri_handler(stream_httpd, &stream_0_uri);
-        }
-    }
-
+    ESP_LOGI(TAG, "Starting HTTP server on port %d", config.server_port);
+    ESP_RETURN_ON_ERROR(httpd_start(&httpd, &config), TAG, "failed to start HTTP server");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &camera_info_uri), TAG, "failed to register camera info API");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &camera_settings_uri), TAG, "failed to register camera settings API");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &static_file_uri), TAG, "failed to register static handler");
     return ESP_OK;
 }
 
-static esp_err_t start_cam_web_server(const web_cam_video_config_t *config, int config_count)
+static esp_err_t start_camera_sources(void)
 {
-    esp_err_t ret;
-    web_cam_t *web_cam;
+    const camera_source_config_t configs[] = {
+#if EXAMPLE_ENABLE_MIPI_CSI_CAM_SENSOR
+        {
+            .camera_id = 0,
+            .kind = CAMERA_SOURCE_KIND_CSI,
+            .dev_name = ESP_VIDEO_MIPI_CSI_DEVICE_NAME,
+            .width = CAMERA_SOURCE_CSI_WIDTH,
+            .height = CAMERA_SOURCE_CSI_HEIGHT,
+            .jpeg_quality = CSI_JPEG_QUALITY,
+            .frame_cb = camera_frame_cb,
+        },
+#endif
+#if EXAMPLE_ENABLE_USB_UVC_CAM_SENSOR
+        {
+            .camera_id = 1,
+            .kind = CAMERA_SOURCE_KIND_USB_UVC,
+            .dev_name = ESP_VIDEO_USB_UVC_DEVICE_NAME(0),
+            .width = CAMERA_SOURCE_USB_WIDTH,
+            .height = CAMERA_SOURCE_USB_HEIGHT,
+            .jpeg_quality = USB_JPEG_QUALITY,
+            .frame_cb = camera_frame_cb,
+        },
+        {
+            .camera_id = 2,
+            .kind = CAMERA_SOURCE_KIND_USB_UVC,
+            .dev_name = ESP_VIDEO_USB_UVC_DEVICE_NAME(1),
+            .width = CAMERA_SOURCE_USB_WIDTH,
+            .height = CAMERA_SOURCE_USB_HEIGHT,
+            .jpeg_quality = USB_JPEG_QUALITY,
+            .frame_cb = camera_frame_cb,
+        },
+#endif
+    };
 
-    ESP_RETURN_ON_ERROR(new_web_cam(config, config_count, &web_cam), TAG, "Failed to new web cam");
-    ESP_GOTO_ON_ERROR(http_server_init(web_cam), fail0, TAG, "Failed to init http server");
+    int valid_count = 0;
+    for (int i = 0; i < sizeof(configs) / sizeof(configs[0]) && i < CAMERA_SOURCE_COUNT_MAX; i++) {
+        camera_source_t *source = NULL;
+        esp_err_t ret = camera_source_create(&configs[i], &source);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "cam%d skipped: %s", configs[i].camera_id, esp_err_to_name(ret));
+            continue;
+        }
 
-    return ESP_OK;
+        ret = camera_source_start(source);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "cam%d start failed: %s", configs[i].camera_id, esp_err_to_name(ret));
+            camera_source_destroy(source);
+            continue;
+        }
 
-fail0:
-    free_web_cam(web_cam);
-    return ret;
+        s_sources[configs[i].camera_id] = source;
+        valid_count++;
+    }
+
+    s_source_count = CAMERA_SOURCE_COUNT_MAX;
+    ESP_LOGI(TAG, "camera init summary: configured=%d valid=%d",
+             (int)(sizeof(configs) / sizeof(configs[0])), valid_count);
+    return valid_count > 0 ? ESP_OK : ESP_ERR_NOT_FOUND;
 }
 
 static void initialise_mdns(void)
@@ -834,7 +316,7 @@ static void initialise_mdns(void)
 
     mdns_txt_item_t serviceTxtData[] = {
         {"board", CONFIG_IDF_TARGET},
-        {"path", "/"}
+        {"path", "/"},
     };
 
     ESP_ERROR_CHECK(mdns_service_add("ESP32-WebServer", "_http", "_tcp", 80, serviceTxtData,
@@ -845,14 +327,10 @@ void app_main(void)
 {
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        // NVS partition was truncated and needs to be erased
-        // Retry nvs_flash_init
         ESP_ERROR_CHECK(nvs_flash_erase());
         ESP_ERROR_CHECK(nvs_flash_init());
     }
 
-    /*For camera devices that require the host to provide XCLK, the video_init() must be called immediately after the device is restarted,
-    otherwise the camera device may not be able to start due to the lack of the main clock.*/
     ESP_ERROR_CHECK(example_video_init());
 
     ESP_ERROR_CHECK(esp_netif_init());
@@ -862,46 +340,32 @@ void app_main(void)
     netbiosns_init();
     netbiosns_set_name(EXAMPLE_MDNS_HOST_NAME);
 
-    /* This helper function configures Wi-Fi or Ethernet, as selected in menuconfig.
-     * Read "Establishing Wi-Fi or Ethernet Connection" section in
-     * examples/protocols/README.md for more information about this function.
-     */
-    ESP_ERROR_CHECK(example_connect());
+    provisioning_button_init();
 
-    ws_init();
+    if (wifi_cred_store_is_provisioned()) {
+        esp_err_t sta_ret = sta_connect_from_nvs();
+        if (sta_ret == ESP_OK) {
+            char pc_ip[16] = {0};
+            char ws_url[64] = {0};
 
-    web_cam_video_config_t config[] = {
-#if EXAMPLE_ENABLE_MIPI_CSI_CAM_SENSOR
-        {
-            .dev_name = ESP_VIDEO_MIPI_CSI_DEVICE_NAME,
-        },
-#endif /* EXAMPLE_ENABLE_MIPI_CSI_CAM_SENSOR */
-#if EXAMPLE_ENABLE_DVP_CAM_SENSOR
-        {
-            .dev_name = ESP_VIDEO_DVP_DEVICE_NAME,
-        },
-#endif /* EXAMPLE_ENABLE_DVP_CAM_SENSOR */
-#if EXAMPLE_ENABLE_SPI_CAM_0_SENSOR
-        {
-            .dev_name = ESP_VIDEO_SPI_DEVICE_NAME,
-        },
-#endif /* EXAMPLE_ENABLE_SPI_CAM_0_SENSOR */
-#if EXAMPLE_ENABLE_SPI_CAM_1_SENSOR
-        {
-            .dev_name = ESP_VIDEO_SPI_DEVICE_1_NAME,
-        },
-#endif /* EXAMPLE_ENABLE_SPI_CAM_1_SENSOR */
-#if EXAMPLE_ENABLE_USB_UVC_CAM_SENSOR
-        {
-            .dev_name = ESP_VIDEO_USB_UVC_DEVICE_NAME(0),
-        },
-#endif /* EXAMPLE_ENABLE_USB_UVC_CAM_SENSOR */
-    };
+            if (wifi_cred_store_load_pc_ip(pc_ip, sizeof(pc_ip)) == ESP_OK && pc_ip[0] != '\0') {
+                snprintf(ws_url, sizeof(ws_url), "ws://%s:8765", pc_ip);
+                remote_log_start(pc_ip, REMOTE_LOG_UDP_PORT);
+                ESP_LOGI(TAG, "Remote UDP log enabled: %s:%d", pc_ip, REMOTE_LOG_UDP_PORT);
+            }
 
-    int config_count = sizeof(config) / sizeof(config[0]);
+            ESP_ERROR_CHECK(ws_streamer_start(ws_url[0] ? ws_url : NULL));
+            ESP_ERROR_CHECK(start_camera_sources());
+            ESP_ERROR_CHECK(http_server_init());
 
-    assert(config_count > 0);
-    ESP_ERROR_CHECK(start_cam_web_server(config, config_count));
-
-    ESP_LOGI(TAG, "Camera web server starts");
+            ESP_LOGI(TAG, "Camera web server starts");
+        } else {
+            ESP_LOGW(TAG, "STA connect failed after retries, restarting to retry...");
+            vTaskDelay(pdMS_TO_TICKS(2000));
+            esp_restart();
+        }
+    } else {
+        ESP_LOGI(TAG, "NVS not provisioned, entering AP provisioning mode");
+        provisioning_manager_run_ap_mode();
+    }
 }

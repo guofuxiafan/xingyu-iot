@@ -61,7 +61,7 @@ typedef struct {
 
 static uvc_host_driver_t *p_uvc_host_driver = NULL;
 
-static esp_err_t uvc_host_interface_check(uint8_t addr, const usb_config_desc_t *config_desc)
+static esp_err_t uvc_host_interface_check(uint8_t addr, uint8_t parent_port_num, const usb_config_desc_t *config_desc)
 {
     assert(config_desc);
     size_t total_length = config_desc->wTotalLength;
@@ -88,6 +88,7 @@ static esp_err_t uvc_host_interface_check(uint8_t addr, const usb_config_desc_t 
                 const uvc_host_driver_event_data_t conn_event = {
                     .type = UVC_HOST_DRIVER_EVENT_DEVICE_CONNECTED,
                     .device_connected.dev_addr = addr,
+                    .device_connected.parent_port_num = parent_port_num,
                     .device_connected.uvc_stream_index = uvc_stream_index,
                     .device_connected.frame_info_num = frame_info_num
                 };
@@ -111,8 +112,13 @@ static esp_err_t uvc_host_device_connected(uint8_t addr)
     bool is_uvc_device = false;
     usb_device_handle_t dev_hdl;
     const usb_config_desc_t *config_desc = NULL;
+    usb_device_info_t dev_info = {0};
+    uint8_t parent_port_num = 0;
 
     if (usb_host_device_open(p_uvc_host_driver->usb_client_hdl, addr, &dev_hdl) == ESP_OK) {
+        if (usb_host_device_info(dev_hdl, &dev_info) == ESP_OK) {
+            parent_port_num = dev_info.parent.port_num;
+        }
         if (usb_host_get_active_config_descriptor(dev_hdl, &config_desc) == ESP_OK) {
             is_uvc_device = uvc_desc_is_uvc_device(config_desc);
         }
@@ -125,7 +131,7 @@ static esp_err_t uvc_host_device_connected(uint8_t addr)
         usb_print_config_descriptor(config_desc, &uvc_print_desc);
 #endif // CONFIG_UVC_PRINTF_CONFIGURATION_DESCRIPTOR
         // Create Interfaces list for a possibility to claim Interface
-        ESP_RETURN_ON_ERROR(uvc_host_interface_check(addr, config_desc), TAG, "uvc stream interface not found");
+        ESP_RETURN_ON_ERROR(uvc_host_interface_check(addr, parent_port_num, config_desc), TAG, "uvc stream interface not found");
     } else {
         ESP_LOGW(TAG, "USB device with addr(%d) is not UVC device", addr);
     }
@@ -1175,4 +1181,27 @@ esp_err_t uvc_host_get_frame_list(uint8_t dev_addr, uint8_t uvc_stream_index, uv
     }
 
     return uvc_desc_get_frame_list(config_desc, uvc_stream_index, frame_info_list, list_size);
+}
+
+esp_err_t uvc_host_get_device_parent_port(uint8_t dev_addr, uint8_t *parent_port_num)
+{
+    ESP_RETURN_ON_FALSE(parent_port_num, ESP_ERR_INVALID_ARG, TAG, "parent_port_num is NULL");
+
+    usb_device_handle_t dev_hdl;
+    if (usb_host_device_open(p_uvc_host_driver->usb_client_hdl, dev_addr, &dev_hdl) != ESP_OK) {
+        return ESP_FAIL;
+    }
+
+    usb_device_info_t dev_info = {0};
+    esp_err_t ret = usb_host_device_info(dev_hdl, &dev_info);
+    esp_err_t close_ret = usb_host_device_close(p_uvc_host_driver->usb_client_hdl, dev_hdl);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    if (close_ret != ESP_OK) {
+        return close_ret;
+    }
+
+    *parent_port_num = dev_info.parent.port_num;
+    return ESP_OK;
 }
