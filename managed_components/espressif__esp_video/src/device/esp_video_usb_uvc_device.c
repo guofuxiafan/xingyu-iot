@@ -48,7 +48,7 @@
 #define UVC_INIT_MAX_STREAMS_PER_DEVICE 6
 
 #define UVC_INTERVAL_DENOMINATOR        (10 * 1000 * 1000)
-#define UVC_TARGET_FPS                  10
+#define UVC_TARGET_FPS                  60
 #define UVC_HOST_PORT_CAMERA1           1
 #define UVC_HOST_PORT_CAMERA2           3
 
@@ -364,7 +364,14 @@ static esp_err_t uvc_video_init(struct esp_video *video)
 
     ESP_GOTO_ON_FALSE(device->dev_addr, ESP_ERR_NOT_FOUND, fail0, TAG, "UVC device=%p is not connected", device);
 
-    device->frame_info = malloc((sizeof(uvc_host_frame_info_t) + sizeof(uint8_t)) * device->frame_info_num);
+    free(device->frame_info);
+    device->frame_info = NULL;
+    device->frame_info_fmt_index = NULL;
+    size_t frame_info_alloc_size = (sizeof(uvc_host_frame_info_t) + sizeof(uint8_t)) * device->frame_info_num;
+    device->frame_info = heap_caps_malloc(frame_info_alloc_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!device->frame_info) {
+        device->frame_info = malloc(frame_info_alloc_size);
+    }
     ESP_GOTO_ON_FALSE(device->frame_info, ESP_ERR_NO_MEM, fail0, TAG, "Failed to allocate memory for frame info");
 
     device->frame_info_fmt_index = (uint8_t *)device->frame_info + sizeof(uvc_host_frame_info_t) * device->frame_info_num;
@@ -422,15 +429,15 @@ static esp_err_t uvc_video_init(struct esp_video *video)
     uint8_t bpp = 0;
     uvc_host_frame_info_t *frame_info = NULL;
     for (int i = 0; i < device->frame_info_num; i++) {
-        if (device->frame_info[i].format == UVC_VS_FORMAT_YUY2 &&
-            device->frame_info[i].h_res == 1280 && device->frame_info[i].v_res == 720) {
+        if (device->frame_info[i].format == UVC_VS_FORMAT_MJPEG &&
+            device->frame_info[i].h_res == 640 && device->frame_info[i].v_res == 480) {
             frame_info = &device->frame_info[i];
             break;
         }
     }
     if (!frame_info) {
         for (int i = 0; i < device->frame_info_num; i++) {
-            if (device->frame_info[i].format == UVC_VS_FORMAT_YUY2) {
+            if (device->frame_info[i].format == UVC_VS_FORMAT_MJPEG) {
                 frame_info = &device->frame_info[i];
                 break;
             }
@@ -455,11 +462,11 @@ static esp_err_t uvc_video_init(struct esp_video *video)
     ESP_LOGI(TAG, "UVC default format selected: %dx%d format=%d fps=%.2f",
              frame_info->h_res, frame_info->v_res, frame_info->format,
              (float)UVC_INTERVAL_DENOMINATOR / (float)device->interval);
-    ESP_GOTO_ON_FALSE(frame_info->format == UVC_VS_FORMAT_YUY2 &&
-                      frame_info->h_res == 1280 && frame_info->v_res == 720 &&
+    ESP_GOTO_ON_FALSE(frame_info->format == UVC_VS_FORMAT_MJPEG &&
+                      frame_info->h_res == 640 && frame_info->v_res == 480 &&
                       device->interval == UVC_INTERVAL_DENOMINATOR / UVC_TARGET_FPS,
                       ESP_ERR_NOT_SUPPORTED, fail1, TAG,
-                      "Required UVC YUY2 1280x720@10fps format is unavailable");
+                      "Required UVC MJPEG 640x480@60fps format is unavailable");
 
     ESP_LOGI(TAG, "=== Memory Diagnostics ===");
     ESP_LOGI(TAG, "Internal+DMA free: %u bytes", (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA));
@@ -472,6 +479,7 @@ static esp_err_t uvc_video_init(struct esp_video *video)
 fail1:
     free(device->frame_info);
     device->frame_info = NULL;
+    device->frame_info_fmt_index = NULL;
 fail0:
     xSemaphoreGive(device->ready_sem);
     return ret;
@@ -587,6 +595,7 @@ static esp_err_t uvc_video_deinit(struct esp_video *video)
 
     free(device->frame_info);
     device->frame_info = NULL;
+    device->frame_info_fmt_index = NULL;
     device->frame_info_num = 0;
 
     xSemaphoreGive(device->ready_sem);

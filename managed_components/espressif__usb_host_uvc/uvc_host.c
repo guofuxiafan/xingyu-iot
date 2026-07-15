@@ -35,6 +35,8 @@
 
 static const char *TAG = "uvc";
 
+#define UVC_DUAL_MJPEG_MAX_PAYLOAD 2048
+
 // UVC spinlock
 portMUX_TYPE uvc_lock = portMUX_INITIALIZER_UNLOCKED;
 
@@ -607,16 +609,29 @@ static esp_err_t uvc_claim_interface(uvc_stream_t *uvc_stream, uint8_t uvc_index
         TAG, "Could not find frame format %dx%d@%2.1fFPS",
         vs_format->h_res, vs_format->v_res, vs_format->fps);
 
+    uint16_t requested_mps = MAX_MPS_IN;
+    if (vs_format->format == UVC_VS_FORMAT_MJPEG &&
+            vs_format->h_res <= 640 && vs_format->v_res <= 480) {
+        requested_mps = UVC_DUAL_MJPEG_MAX_PAYLOAD;
+    }
+
     ESP_RETURN_ON_ERROR(
-        uvc_desc_get_streaming_intf_and_ep(cfg_desc, bInterfaceNumber, MAX_MPS_IN, &intf_desc, &ep_desc),
+        uvc_desc_get_streaming_intf_and_ep(cfg_desc, bInterfaceNumber, requested_mps, &intf_desc, &ep_desc),
         TAG, "Could not find Streaming interface %d", bInterfaceNumber);
+
+    const uint16_t effective_mps = USB_EP_DESC_GET_MPS(ep_desc) * (USB_EP_DESC_GET_MULT(ep_desc) + 1);
 
     // Save all constant information about the UVC stream
     uvc_stream->constant.bInterfaceNumber  = bInterfaceNumber;
     uvc_stream->constant.bcdUVC            = bcdUVC;
     uvc_stream->constant.bAlternateSetting = intf_desc->bAlternateSetting;
     uvc_stream->constant.bEndpointAddress  = ep_desc->bEndpointAddress;
+    uvc_stream->constant.max_payload_transfer_size = effective_mps;
     *ep_desc_ret                           = ep_desc;
+
+    ESP_LOGI(TAG, "Selected interface %u alternate %u endpoint 0x%02x effective MPS %u (limit %u)",
+             bInterfaceNumber, intf_desc->bAlternateSetting, ep_desc->bEndpointAddress,
+             effective_mps, requested_mps);
 
     // Claim the interface in USB Host Lib
     return usb_host_interface_claim(

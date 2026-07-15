@@ -283,8 +283,8 @@ static esp_err_t start_camera_sources(void)
             .dev_name = ESP_VIDEO_USB_UVC_DEVICE_NAME(0),
             .width = CAMERA_SOURCE_USB_WIDTH,
             .height = CAMERA_SOURCE_USB_HEIGHT,
-            .target_pixel_format = V4L2_PIX_FMT_YUYV,
-            .target_frame_rate = 10,
+            .target_pixel_format = V4L2_PIX_FMT_JPEG,
+            .target_frame_rate = 60,
             .jpeg_quality = USB_JPEG_QUALITY,
             .frame_cb = camera_frame_cb,
         },
@@ -294,8 +294,8 @@ static esp_err_t start_camera_sources(void)
             .dev_name = ESP_VIDEO_USB_UVC_DEVICE_NAME(1),
             .width = CAMERA_SOURCE_USB_WIDTH,
             .height = CAMERA_SOURCE_USB_HEIGHT,
-            .target_pixel_format = V4L2_PIX_FMT_YUYV,
-            .target_frame_rate = 10,
+            .target_pixel_format = V4L2_PIX_FMT_JPEG,
+            .target_frame_rate = 60,
             .jpeg_quality = USB_JPEG_QUALITY,
             .frame_cb = camera_frame_cb,
         },
@@ -352,8 +352,8 @@ static void usb_dual_retry_task(void *arg)
             .dev_name = ESP_VIDEO_USB_UVC_DEVICE_NAME(0),
             .width = CAMERA_SOURCE_USB_WIDTH,
             .height = CAMERA_SOURCE_USB_HEIGHT,
-            .target_pixel_format = V4L2_PIX_FMT_YUYV,
-            .target_frame_rate = 10,
+            .target_pixel_format = V4L2_PIX_FMT_JPEG,
+            .target_frame_rate = 60,
             .jpeg_quality = USB_JPEG_QUALITY,
             .frame_cb = camera_frame_cb,
         },
@@ -363,8 +363,8 @@ static void usb_dual_retry_task(void *arg)
             .dev_name = ESP_VIDEO_USB_UVC_DEVICE_NAME(1),
             .width = CAMERA_SOURCE_USB_WIDTH,
             .height = CAMERA_SOURCE_USB_HEIGHT,
-            .target_pixel_format = V4L2_PIX_FMT_YUYV,
-            .target_frame_rate = 10,
+            .target_pixel_format = V4L2_PIX_FMT_JPEG,
+            .target_frame_rate = 60,
             .jpeg_quality = USB_JPEG_QUALITY,
             .frame_cb = camera_frame_cb,
         },
@@ -404,6 +404,8 @@ static void usb_dual_retry_task(void *arg)
                 both_ok = false;
                 break;
             }
+        }
+        for (int i = 0; both_ok && i < 2; i++) {
             if (camera_source_start(srcs[i]) != ESP_OK) {
                 both_ok = false;
                 break;

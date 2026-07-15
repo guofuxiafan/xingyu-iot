@@ -81,6 +81,12 @@ static esp_err_t uvc_host_stream_control(uvc_host_stream_hdl_t stream_hdl, uvc_v
         } else {
             vs_control->dwFrameInterval = UVC_DESC_FPS_TO_DWFRAMEINTERVAL(vs_format->fps); // Implicit conversion from float to uint32_t
         }
+
+        if (uvc_stream->constant.max_payload_transfer_size != 0 &&
+                (vs_control->dwMaxPayloadTransferSize == 0 ||
+                 vs_control->dwMaxPayloadTransferSize > uvc_stream->constant.max_payload_transfer_size)) {
+            vs_control->dwMaxPayloadTransferSize = uvc_stream->constant.max_payload_transfer_size;
+        }
     }
 
     // Issue CTRL request
