@@ -10,6 +10,8 @@
 #include "esp_video_ioctl.h"
 #include "esp_video_init.h"
 #include "esp_cam_sensor_xclk.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #if CONFIG_EXAMPLE_SELECT_JPEG_HW_DRIVER
 #include "driver/jpeg_encode.h"
 #else
@@ -34,6 +36,8 @@ static const char *TAG = "example_encoder";
  */
 static jpeg_encoder_handle_t s_jpeg_hw_handle;
 static uint32_t s_jpeg_hw_ref_count;
+static StaticSemaphore_t s_jpeg_hw_mutex_storage;
+static SemaphoreHandle_t s_jpeg_hw_mutex;
 #endif
 
 /**
@@ -57,6 +61,11 @@ esp_err_t example_encoder_init(example_encoder_config_t *config, example_encoder
 #if CONFIG_EXAMPLE_SELECT_JPEG_HW_DRIVER
     jpeg_encode_cfg_t jpeg_enc_config = {0};
     jpeg_encoder_handle_t jpeg_handle = NULL;
+
+    if (!s_jpeg_hw_mutex) {
+        s_jpeg_hw_mutex = xSemaphoreCreateMutexStatic(&s_jpeg_hw_mutex_storage);
+        ESP_RETURN_ON_FALSE(s_jpeg_hw_mutex, ESP_ERR_NO_MEM, TAG, "failed to create JPEG hardware mutex");
+    }
 #else
     jpeg_enc_handle_t jpeg_handle = NULL;
     jpeg_enc_config_t jpeg_enc_config = {0};
@@ -156,10 +165,12 @@ esp_err_t example_encoder_init(example_encoder_config_t *config, example_encoder
 
 #if CONFIG_EXAMPLE_SELECT_JPEG_HW_DRIVER
     encoder->jpeg_enc_config = jpeg_enc_config;
+    xSemaphoreTake(s_jpeg_hw_mutex, portMAX_DELAY);
     if (!s_jpeg_hw_ref_count) {
-        s_jpeg_hw_ref_count++;
         s_jpeg_hw_handle = jpeg_handle;
     }
+    s_jpeg_hw_ref_count++;
+    xSemaphoreGive(s_jpeg_hw_mutex);
 #else
     encoder->jpeg_handle = jpeg_handle;
 #endif
@@ -172,7 +183,9 @@ esp_err_t example_encoder_init(example_encoder_config_t *config, example_encoder
 
 fail0:
 #if CONFIG_EXAMPLE_SELECT_JPEG_HW_DRIVER
-    jpeg_del_encoder_engine(jpeg_handle);
+    if (jpeg_handle) {
+        jpeg_del_encoder_engine(jpeg_handle);
+    }
 #else
     jpeg_enc_close(jpeg_handle);
 #endif
@@ -287,7 +300,9 @@ esp_err_t example_encoder_process(example_encoder_handle_t handle, uint8_t *src_
     example_encoder_t *encoder = (example_encoder_t *)handle;
 
 #if CONFIG_EXAMPLE_SELECT_JPEG_HW_DRIVER
+    xSemaphoreTake(s_jpeg_hw_mutex, portMAX_DELAY);
     ret = jpeg_encoder_process(s_jpeg_hw_handle, &encoder->jpeg_enc_config, src_buf, src_size, dst_buf, dst_size, dst_size_out);
+    xSemaphoreGive(s_jpeg_hw_mutex);
 #else
     ret = jpeg_enc_process(encoder->jpeg_handle, src_buf, src_size, dst_buf, dst_size, (int *)dst_size_out);
 #endif
@@ -313,7 +328,9 @@ esp_err_t example_encoder_set_jpeg_quality(example_encoder_handle_t handle, uint
     }
 
 #if CONFIG_EXAMPLE_SELECT_JPEG_HW_DRIVER
+    xSemaphoreTake(s_jpeg_hw_mutex, portMAX_DELAY);
     encoder->jpeg_enc_config.image_quality = quality;
+    xSemaphoreGive(s_jpeg_hw_mutex);
 #else
     ret = jpeg_enc_set_quality(encoder->jpeg_handle, quality);
 #endif
@@ -335,6 +352,7 @@ esp_err_t example_encoder_deinit(example_encoder_handle_t handle)
     }
 
 #if CONFIG_EXAMPLE_SELECT_JPEG_HW_DRIVER
+    xSemaphoreTake(s_jpeg_hw_mutex, portMAX_DELAY);
     if (s_jpeg_hw_ref_count) {
         s_jpeg_hw_ref_count--;
         if (!s_jpeg_hw_ref_count) {
@@ -344,6 +362,7 @@ esp_err_t example_encoder_deinit(example_encoder_handle_t handle)
     } else {
         ESP_LOGW(TAG, "jpeg hardware encoder ref count already 0, possible double deinit");
     }
+    xSemaphoreGive(s_jpeg_hw_mutex);
 #else
     jpeg_enc_close(encoder->jpeg_handle);
 #endif

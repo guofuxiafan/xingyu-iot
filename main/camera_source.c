@@ -20,17 +20,25 @@
 #include "example_video_common.h"
 #include "linux/videodev2.h"
 
-#define CAMERA_VIDEO_BUFFER_NUMBER CONFIG_EXAMPLE_CAMERA_VIDEO_BUFFER_NUMBER
-#define JPEG_MIN_SIZE              16
-#define USB_OPEN_RETRIES           20
-#define USB_OPEN_RETRY_DELAY_MS    2000
-#define WS_SEND_INTERVAL_MS        100
+#define CSI_VIDEO_BUFFER_NUMBER CONFIG_EXAMPLE_CAMERA_VIDEO_BUFFER_NUMBER
+#define USB_VIDEO_BUFFER_NUMBER CONFIG_EXAMPLE_USB_CAMERA_VIDEO_BUFFER_NUMBER
+#if USB_VIDEO_BUFFER_NUMBER > CSI_VIDEO_BUFFER_NUMBER
+#define CAMERA_VIDEO_BUFFER_MAX USB_VIDEO_BUFFER_NUMBER
+#else
+#define CAMERA_VIDEO_BUFFER_MAX CSI_VIDEO_BUFFER_NUMBER
+#endif
+#define JPEG_MIN_SIZE           16
+#define USB_OPEN_RETRIES        20
+#define USB_OPEN_RETRY_DELAY_MS 2000
+#define WS_SEND_INTERVAL_MS     100
+#define DROP_LOG_INTERVAL_MS    1000
 
 struct camera_source {
     camera_source_config_t config;
     int fd;
-    uint8_t *buffer[CAMERA_VIDEO_BUFFER_NUMBER];
-    uint32_t buffer_size[CAMERA_VIDEO_BUFFER_NUMBER];
+    uint8_t *buffer[CAMERA_VIDEO_BUFFER_MAX];
+    uint32_t buffer_size[CAMERA_VIDEO_BUFFER_MAX];
+    uint32_t buffer_count;
     uint32_t pixel_format;
     uint32_t frame_rate;
     uint8_t jpeg_quality;
@@ -40,6 +48,10 @@ struct camera_source {
     uint32_t jpeg_out_size;
     SemaphoreHandle_t encoder_lock;
     TaskHandle_t task;
+    uint32_t incomplete_mjpeg_drop_count;
+    uint64_t next_incomplete_mjpeg_log_ms;
+    uint32_t jpeg_encode_fail_count;
+    uint64_t next_jpeg_encode_fail_log_ms;
 };
 
 static const char *TAG = "camera_source";
@@ -59,6 +71,40 @@ static bool is_raw_bayer_format(uint32_t pixfmt)
            pixfmt == V4L2_PIX_FMT_SGRBG10 || pixfmt == V4L2_PIX_FMT_SRGGB10 ||
            pixfmt == V4L2_PIX_FMT_SBGGR12 || pixfmt == V4L2_PIX_FMT_SGBRG12 ||
            pixfmt == V4L2_PIX_FMT_SGRBG12 || pixfmt == V4L2_PIX_FMT_SRGGB12;
+}
+
+static uint32_t get_buffer_count(camera_source_t *source)
+{
+    return source->config.kind == CAMERA_SOURCE_KIND_USB_UVC ?
+           USB_VIDEO_BUFFER_NUMBER : CSI_VIDEO_BUFFER_NUMBER;
+}
+
+static void yuyv_to_uyvy_in_place(uint8_t *data, uint32_t len)
+{
+    for (uint32_t i = 0; i + 3 < len; i += 4) {
+        uint8_t y0 = data[i];
+        uint8_t u = data[i + 1];
+        uint8_t y1 = data[i + 2];
+        uint8_t v = data[i + 3];
+        data[i] = u;
+        data[i + 1] = y0;
+        data[i + 2] = v;
+        data[i + 3] = y1;
+    }
+}
+
+static void log_drop_limited(camera_source_t *source, uint32_t *count, uint64_t *next_log_ms,
+                             const char *reason, uint32_t last_len)
+{
+    (*count)++;
+
+    uint64_t now_ms = (uint64_t)(esp_timer_get_time() / 1000);
+    if (*next_log_ms == 0 || now_ms >= *next_log_ms) {
+        ESP_LOGW(TAG, "cam%d: %s x%" PRIu32 " in last %dms, last_len=%" PRIu32,
+                 source->config.camera_id, reason, *count, DROP_LOG_INTERVAL_MS, last_len);
+        *count = 0;
+        *next_log_ms = now_ms + DROP_LOG_INTERVAL_MS;
+    }
 }
 
 static esp_err_t set_v4l2_jpeg_quality(camera_source_t *source, uint8_t quality)
@@ -118,8 +164,8 @@ static esp_err_t configure_format(camera_source_t *source)
 
     format.fmt.pix.width = source->config.width;
     format.fmt.pix.height = source->config.height;
-    if (source->config.kind == CAMERA_SOURCE_KIND_USB_UVC) {
-        format.fmt.pix.pixelformat = V4L2_PIX_FMT_JPEG;
+    if (source->config.target_pixel_format) {
+        format.fmt.pix.pixelformat = source->config.target_pixel_format;
     } else if (is_raw_bayer_format(format.fmt.pix.pixelformat)) {
         format.fmt.pix.pixelformat = V4L2_PIX_FMT_RGB565;
     }
@@ -139,10 +185,22 @@ static esp_err_t configure_format(camera_source_t *source)
         return ESP_ERR_NOT_SUPPORTED;
     }
 
-    if (source->config.kind == CAMERA_SOURCE_KIND_USB_UVC &&
-        format.fmt.pix.pixelformat != V4L2_PIX_FMT_JPEG) {
-        ESP_LOGE(TAG, "cam%d: strict USB target MJPEG not available, got " V4L2_FMT_STR,
+    if (source->config.target_frame_rate) {
+        struct v4l2_streamparm sparm = {
+            .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+        };
+        sparm.parm.capture.timeperframe.numerator = 1;
+        sparm.parm.capture.timeperframe.denominator = source->config.target_frame_rate;
+        ESP_RETURN_ON_FALSE(ioctl(source->fd, VIDIOC_S_PARM, &sparm) == 0,
+                            ESP_ERR_NOT_SUPPORTED, TAG, "cam%d: target frame rate %" PRIu32 "fps is unavailable",
+                            source->config.camera_id, source->config.target_frame_rate);
+    }
+
+    if (source->config.target_pixel_format &&
+        format.fmt.pix.pixelformat != source->config.target_pixel_format) {
+        ESP_LOGE(TAG, "cam%d: strict target format " V4L2_FMT_STR " not available, got " V4L2_FMT_STR,
                  source->config.camera_id,
+                 V4L2_FMT_STR_ARG(source->config.target_pixel_format),
                  V4L2_FMT_STR_ARG(format.fmt.pix.pixelformat));
         return ESP_ERR_NOT_SUPPORTED;
     }
@@ -173,6 +231,12 @@ static esp_err_t configure_format(camera_source_t *source)
                              (timeperframe->denominator / timeperframe->numerator) : 0;
     }
 
+    if (source->config.target_frame_rate && source->frame_rate != source->config.target_frame_rate) {
+        ESP_LOGE(TAG, "cam%d: strict target frame rate %" PRIu32 "fps not available, got %" PRIu32 "fps",
+                 source->config.camera_id, source->config.target_frame_rate, source->frame_rate);
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
     ESP_LOGI(TAG, "cam%d target format " V4L2_FMT_STR " %" PRIu32 "x%" PRIu32 " @%" PRIu32 "fps",
              source->config.camera_id,
              V4L2_FMT_STR_ARG(source->pixel_format),
@@ -184,15 +248,24 @@ static esp_err_t configure_format(camera_source_t *source)
 
 static esp_err_t setup_buffers(camera_source_t *source)
 {
+    uint32_t requested_count = get_buffer_count(source);
     struct v4l2_requestbuffers req = {
-        .count = CAMERA_VIDEO_BUFFER_NUMBER,
+        .count = requested_count,
         .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
         .memory = V4L2_MEMORY_MMAP,
     };
     ESP_RETURN_ON_FALSE(ioctl(source->fd, VIDIOC_REQBUFS, &req) == 0,
                         ESP_FAIL, TAG, "cam%d: failed to request buffers", source->config.camera_id);
+    ESP_RETURN_ON_FALSE(req.count > 0 && req.count <= CAMERA_VIDEO_BUFFER_MAX,
+                        ESP_ERR_INVALID_SIZE, TAG, "cam%d: invalid buffer count %" PRIu32,
+                        source->config.camera_id, req.count);
+    if (req.count < requested_count) {
+        ESP_LOGW(TAG, "cam%d: requested %" PRIu32 " buffers, got %" PRIu32,
+                 source->config.camera_id, requested_count, req.count);
+    }
+    source->buffer_count = req.count;
 
-    for (int i = 0; i < CAMERA_VIDEO_BUFFER_NUMBER; i++) {
+    for (uint32_t i = 0; i < source->buffer_count; i++) {
         struct v4l2_buffer buf = {
             .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
             .memory = V4L2_MEMORY_MMAP,
@@ -219,7 +292,7 @@ static void cleanup_buffers(camera_source_t *source)
         return;
     }
 
-    for (int i = 0; i < CAMERA_VIDEO_BUFFER_NUMBER; i++) {
+    for (uint32_t i = 0; i < source->buffer_count; i++) {
         if (source->buffer[i] && source->buffer[i] != MAP_FAILED && source->buffer_size[i] > 0) {
             munmap(source->buffer[i], source->buffer_size[i]);
             source->buffer[i] = NULL;
@@ -266,7 +339,7 @@ static esp_err_t setup_encoder(camera_source_t *source)
     example_encoder_config_t encoder_config = {
         .width = source->config.width,
         .height = source->config.height,
-        .pixel_format = source->pixel_format,
+        .pixel_format = source->pixel_format == V4L2_PIX_FMT_YUYV ? V4L2_PIX_FMT_UYVY : source->pixel_format,
         .quality = source->config.jpeg_quality,
     };
     ESP_RETURN_ON_ERROR(example_encoder_init(&encoder_config, &source->encoder_handle),
@@ -298,7 +371,7 @@ static void capture_task(void *arg)
             continue;
         }
 
-        if (!(buf.flags & V4L2_BUF_FLAG_DONE) || buf.index >= CAMERA_VIDEO_BUFFER_NUMBER) {
+        if (!(buf.flags & V4L2_BUF_FLAG_DONE) || buf.index >= source->buffer_count) {
             ioctl(source->fd, VIDIOC_QBUF, &buf);
             continue;
         }
@@ -321,12 +394,35 @@ static void capture_task(void *arg)
             jpeg_src = source->buffer[buf.index];
             jpeg_len = buf.bytesused;
             if (!is_complete_jpeg(jpeg_src, jpeg_len)) {
-                ESP_LOGW(TAG, "cam%d: drop incomplete MJPEG frame len=%" PRIu32,
-                         source->config.camera_id, jpeg_len);
+                log_drop_limited(source,
+                                 &source->incomplete_mjpeg_drop_count,
+                                 &source->next_incomplete_mjpeg_log_ms,
+                                 "drop incomplete MJPEG frame",
+                                 jpeg_len);
                 ioctl(source->fd, VIDIOC_QBUF, &buf);
                 continue;
             }
         } else {
+            uint32_t source_size = source->buffer_size[buf.index];
+            if (source->pixel_format == V4L2_PIX_FMT_YUYV) {
+                uint32_t expected_size = source->config.width * source->config.height * 2;
+                if (buf.bytesused < expected_size || source->buffer_size[buf.index] < expected_size) {
+                    log_drop_limited(source,
+                                     &source->jpeg_encode_fail_count,
+                                     &source->next_jpeg_encode_fail_log_ms,
+                                     "short YUYV frame",
+                                     buf.bytesused);
+                    ioctl(source->fd, VIDIOC_QBUF, &buf);
+                    continue;
+                }
+                source_size = expected_size;
+                yuyv_to_uyvy_in_place(source->buffer[buf.index], source_size);
+                esp_cache_msync(source->buffer[buf.index], source_size,
+                                ESP_CACHE_MSYNC_FLAG_DIR_C2M |
+                                ESP_CACHE_MSYNC_FLAG_TYPE_DATA |
+                                ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+            }
+
             if (xSemaphoreTake(source->encoder_lock, pdMS_TO_TICKS(100)) != pdPASS) {
                 ioctl(source->fd, VIDIOC_QBUF, &buf);
                 continue;
@@ -334,13 +430,17 @@ static void capture_task(void *arg)
 
             esp_err_t ret = example_encoder_process(source->encoder_handle,
                                                     source->buffer[buf.index],
-                                                    source->buffer_size[buf.index],
+                                                    source_size,
                                                     source->jpeg_out_buf,
                                                     source->jpeg_out_size,
                                                     &jpeg_len);
             xSemaphoreGive(source->encoder_lock);
             if (ret != ESP_OK || !is_complete_jpeg(source->jpeg_out_buf, jpeg_len)) {
-                ESP_LOGW(TAG, "cam%d: JPEG encode failed", source->config.camera_id);
+                log_drop_limited(source,
+                                 &source->jpeg_encode_fail_count,
+                                 &source->next_jpeg_encode_fail_log_ms,
+                                 "JPEG encode failed",
+                                 jpeg_len);
                 ioctl(source->fd, VIDIOC_QBUF, &buf);
                 continue;
             }

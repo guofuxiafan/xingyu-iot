@@ -16,6 +16,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/task.h"
 
 typedef struct uvc_host_stream_s uvc_stream_t;
 
@@ -63,4 +64,17 @@ struct uvc_host_stream_s {
         bool skip_current_frame;                        // Flag to skip current frame. An error has occurred in the stream
         uint8_t current_frame_id;                       // Frame ID can be only 0 or 1. But we also allow setting it to invalid value = 2.
     } single_thread; // Single thread members are only accessed from 1 thread, so they do not need protection
+
+    struct {
+        volatile uint32_t packet_error;
+        volatile uint32_t packet_lost;
+        volatile uint32_t invalid_header;
+        volatile uint32_t frame_error;
+        volatile uint32_t invalid_soi;
+        volatile uint32_t missed_eof;
+        volatile uint32_t buffer_underflow;
+        volatile uint32_t buffer_overflow;
+        volatile bool stop;
+        TaskHandle_t task;
+    } diagnostics;
 };

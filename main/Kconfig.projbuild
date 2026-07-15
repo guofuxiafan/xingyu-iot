@@ -1,17 +1,34 @@
 menu "Example Configuration"
     
     config EXAMPLE_CAMERA_VIDEO_BUFFER_NUMBER
-        int "Camera video buffer number"
+        int "CSI camera video buffer number"
         default 2
+        range 2 4
         help
-            Number of video buffers for the camera sensor.
+            Number of video buffers for the CSI camera sensor.
 
-            More buffers provide better performance and reduce frame drops,
-            but consume more memory. Recommended range: 2-4 buffers.
-            
-            - 2 buffers: Minimum for basic operation
-            - 3-4 buffers: Better performance for smooth streaming
-            - Higher values: May improve performance but increase memory usage
+            Keep this conservative because 1080p CSI raw/RGB buffers are large.
+
+    config EXAMPLE_USB_CAMERA_VIDEO_BUFFER_NUMBER
+        int "USB camera video buffer number"
+        default 4
+        range 4 10
+        help
+            Number of V4L2 frame buffers per USB UVC camera.
+
+            Four buffers per stream are sufficient for the fixed 10fps YUYV
+            mode while leaving PSRAM for JPEG output buffers.
+
+    config EXAMPLE_USB_UVC_URB_NUMBER
+        int "USB UVC in-flight URB number"
+        default 4
+        range 2 16
+        help
+            Number of USB transfer requests kept in flight per UVC stream.
+
+            Larger values provide more buffering against ISR/task scheduling
+            jitter and can reduce missed EOF/incomplete MJPEG frames. They
+            consume additional DMA-capable memory proportional to the URB size.
 
     config EXAMPLE_JPEG_COMPRESSION_QUALITY
         int "JPEG compression quality (%)"

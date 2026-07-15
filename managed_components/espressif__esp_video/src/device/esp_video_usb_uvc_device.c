@@ -37,13 +37,19 @@
 #define UVC_DEVICE_INIT_TASK_PRIORITY   5
 
 #define UVC_DEVICE_URB_SIZE             CONFIG_USB_UVC_VIDEO_DEVICE_URB_SIZE
+#ifdef CONFIG_EXAMPLE_USB_UVC_URB_NUMBER
+#define UVC_DEVICE_URB_COUNT            CONFIG_EXAMPLE_USB_UVC_URB_NUMBER
+#else
+#define UVC_DEVICE_URB_COUNT            6
+#endif
 
 #define UVC_INIT_TIMEOUT_MS             CONFIG_USB_UVC_INIT_TIMEOUT_MS
 #define UVC_INIT_MAX_PHYSICAL_DEVICES   6
 #define UVC_INIT_MAX_STREAMS_PER_DEVICE 6
 
 #define UVC_INTERVAL_DENOMINATOR        (10 * 1000 * 1000)
-#define UVC_HOST_PORT_CAMERA1           2
+#define UVC_TARGET_FPS                  10
+#define UVC_HOST_PORT_CAMERA1           1
 #define UVC_HOST_PORT_CAMERA2           3
 
 struct uvc_video {
@@ -170,18 +176,39 @@ static esp_err_t v4l2_to_uvc_format(uint32_t v4l2_format, enum uvc_host_stream_f
     }
 }
 
-static uint32_t uvc_frame_get_slowest_interval(const uvc_host_frame_info_t *frame_info)
+static uint32_t uvc_frame_get_target_interval(const uvc_host_frame_info_t *frame_info)
 {
     uint32_t interval = frame_info->default_interval;
+    uint32_t target_interval = UVC_INTERVAL_DENOMINATOR / UVC_TARGET_FPS;
 
     if (frame_info->interval_type == 0) {
-        if (frame_info->interval_max > 0) {
+        if (frame_info->interval_min <= target_interval &&
+            target_interval <= frame_info->interval_max) {
+            interval = target_interval;
+            if (frame_info->interval_step > 0) {
+                interval = frame_info->interval_min +
+                           ((target_interval - frame_info->interval_min) / frame_info->interval_step) *
+                           frame_info->interval_step;
+            }
+        } else if (target_interval > frame_info->interval_max && frame_info->interval_max > 0) {
             interval = frame_info->interval_max;
+        } else if (frame_info->interval_min > 0) {
+            interval = frame_info->interval_min;
         }
     } else {
         int num = MIN(frame_info->interval_type, CONFIG_UVC_INTERVAL_ARRAY_SIZE);
+        bool found_not_faster_than_target = false;
         for (int i = 0; i < num; i++) {
-            if (frame_info->interval[i] > interval) {
+            if (frame_info->interval[i] == target_interval) {
+                interval = frame_info->interval[i];
+                found_not_faster_than_target = true;
+                break;
+            }
+            if (frame_info->interval[i] > target_interval &&
+                (!found_not_faster_than_target || frame_info->interval[i] < interval)) {
+                interval = frame_info->interval[i];
+                found_not_faster_than_target = true;
+            } else if (!found_not_faster_than_target && frame_info->interval[i] > interval) {
                 interval = frame_info->interval[i];
             }
         }
@@ -207,14 +234,10 @@ static void uvc_event_callback(const uvc_host_stream_event_data_t *event, void *
 {
     switch (event->type) {
     case UVC_HOST_TRANSFER_ERROR:
-        ESP_LOGD(TAG, "USB error has occurred, err_no = %i", event->transfer_error.error);
         break;
     case UVC_HOST_DEVICE_DISCONNECTED: {
         struct esp_video *video = (struct esp_video *)user_ctx;
         struct uvc_video *device = VIDEO_PRIV_DATA(struct uvc_video *, video);
-
-        ESP_LOGD(TAG, "Device disconnected, dev_addr = %d, parent_port = %d, stream_index = %d",
-                 device->dev_addr, device->parent_port_num, device->stream_index);
 
         device->dev_addr = 0;
         device->parent_port_num = 0;
@@ -224,13 +247,10 @@ static void uvc_event_callback(const uvc_host_stream_event_data_t *event, void *
         break;
     }
     case UVC_HOST_FRAME_BUFFER_OVERFLOW:
-        ESP_LOGD(TAG, "Frame buffer overflow");
         break;
     case UVC_HOST_FRAME_BUFFER_UNDERFLOW:
-        ESP_LOGD(TAG, "Frame buffer underflow");
         break;
     default:
-        abort();
         break;
     }
 }
@@ -259,7 +279,7 @@ static void uvc_host_driver_event_callback(const uvc_host_driver_event_data_t *e
         portEXIT_CRITICAL(&core->lock);
 
         if (!found_device) {
-            ESP_LOGW(TAG, "Ignore UVC dev_addr=%d on HUB port %d; expected port2->cam1 or port3->cam2, or slot is already busy",
+            ESP_LOGW(TAG, "Ignore UVC dev_addr=%d on HUB port %d; expected hub port1->cam1 or hub port3->cam2, or slot is already busy",
                      event->device_connected.dev_addr, parent_port_num);
             break;
         } else {
@@ -309,7 +329,7 @@ static esp_err_t uvc_video_init(struct esp_video *video)
                     }
                     ESP_LOGI(TAG, "UVC init scan: dev_addr=%d parent_port=%d stream_index=%d frame_info_num=%u",
                              dev_addr_list[i], parent_port_num, stream_idx, (unsigned int)frame_list_size);
-                    /* Fixed physical HOST ports: port2->cam1(slot0), port3->cam2(slot1). */
+                    /* Fixed board HOST ports: enumerated hub port1->cam1(slot0), hub port3->cam2(slot1). */
                     portENTER_CRITICAL(&core->lock);
                     struct uvc_video *assigned = uvc_assign_fixed_port_device(core,
                                                                               dev_addr_list[i],
@@ -321,7 +341,7 @@ static esp_err_t uvc_video_init(struct esp_video *video)
                         detected_uvc_count++;
                         xSemaphoreGive(assigned->ready_sem);
                     } else {
-                        ESP_LOGW(TAG, "UVC init scan: ignore dev_addr=%d on HUB port %d; expected port2->cam1 or port3->cam2, or slot is already busy",
+                        ESP_LOGW(TAG, "UVC init scan: ignore dev_addr=%d on HUB port %d; expected hub port1->cam1 or hub port3->cam2, or slot is already busy",
                                  dev_addr_list[i], parent_port_num);
                     }
                 }
@@ -400,7 +420,25 @@ static esp_err_t uvc_video_init(struct esp_video *video)
     }
 
     uint8_t bpp = 0;
-    uvc_host_frame_info_t *frame_info = &device->frame_info[0];
+    uvc_host_frame_info_t *frame_info = NULL;
+    for (int i = 0; i < device->frame_info_num; i++) {
+        if (device->frame_info[i].format == UVC_VS_FORMAT_YUY2 &&
+            device->frame_info[i].h_res == 1280 && device->frame_info[i].v_res == 720) {
+            frame_info = &device->frame_info[i];
+            break;
+        }
+    }
+    if (!frame_info) {
+        for (int i = 0; i < device->frame_info_num; i++) {
+            if (device->frame_info[i].format == UVC_VS_FORMAT_YUY2) {
+                frame_info = &device->frame_info[i];
+                break;
+            }
+        }
+        if (!frame_info) {
+            frame_info = &device->frame_info[0];
+        }
+    }
 
     struct v4l2_format format = {
         .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
@@ -413,10 +451,21 @@ static esp_err_t uvc_video_init(struct esp_video *video)
     ESP_GOTO_ON_ERROR(esp_video_config_buffer(video, &format, FRAME_MEM_CAPS), fail1, TAG, "failed to configure stream buffer");
 
     device->uvc_stream_format = frame_info->format;
-    device->interval = uvc_frame_get_slowest_interval(frame_info);
+    device->interval = uvc_frame_get_target_interval(frame_info);
     ESP_LOGI(TAG, "UVC default format selected: %dx%d format=%d fps=%.2f",
              frame_info->h_res, frame_info->v_res, frame_info->format,
              (float)UVC_INTERVAL_DENOMINATOR / (float)device->interval);
+    ESP_GOTO_ON_FALSE(frame_info->format == UVC_VS_FORMAT_YUY2 &&
+                      frame_info->h_res == 1280 && frame_info->v_res == 720 &&
+                      device->interval == UVC_INTERVAL_DENOMINATOR / UVC_TARGET_FPS,
+                      ESP_ERR_NOT_SUPPORTED, fail1, TAG,
+                      "Required UVC YUY2 1280x720@10fps format is unavailable");
+
+    ESP_LOGI(TAG, "=== Memory Diagnostics ===");
+    ESP_LOGI(TAG, "Internal+DMA free: %u bytes", (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA));
+    ESP_LOGI(TAG, "PSRAM free:        %u bytes", (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    ESP_LOGI(TAG, "Max DMA block:     %u bytes", (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+    ESP_LOGI(TAG, "Max PSRAM block:   %u bytes", (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
 
     return ESP_OK;
 
@@ -464,7 +513,7 @@ static esp_err_t uvc_video_start(struct esp_video *video, uint32_t type)
             .number_of_frame_buffers = info->count,
             .frame_size = info->size,
             .frame_heap_caps = info->caps,
-            .number_of_urbs = buffer_count,
+            .number_of_urbs = UVC_DEVICE_URB_COUNT,
             .user_frame_buffers = buffer_array,
             .urb_size = UVC_DEVICE_URB_SIZE,
         },
@@ -574,7 +623,7 @@ static esp_err_t uvc_video_set_format(struct esp_video *video, const struct v4l2
     for (int i = 0; i < device->frame_info_num; i++) {
         if (device->frame_info[i].format == uvc_stream_format) {
             if (device->frame_info[i].h_res == width && device->frame_info[i].v_res == height) {
-                interval = uvc_frame_get_slowest_interval(&device->frame_info[i]);
+                interval = uvc_frame_get_target_interval(&device->frame_info[i]);
                 found = true;
                 break;
             }
@@ -592,6 +641,11 @@ static esp_err_t uvc_video_set_format(struct esp_video *video, const struct v4l2
     ESP_LOGI(TAG, "UVC format selected: %" PRIu32 "x%" PRIu32 " format=%d fps=%.2f",
              width, height, uvc_stream_format,
              (float)UVC_INTERVAL_DENOMINATOR / (float)device->interval);
+    if ((UVC_INTERVAL_DENOMINATOR / device->interval) > UVC_TARGET_FPS) {
+        ESP_LOGW(TAG, "UVC target %dfps is not available for %" PRIu32 "x%" PRIu32 " format=%d; using %.2ffps",
+                 UVC_TARGET_FPS, width, height, uvc_stream_format,
+                 (float)UVC_INTERVAL_DENOMINATOR / (float)device->interval);
+    }
 
     return ESP_OK;
 }

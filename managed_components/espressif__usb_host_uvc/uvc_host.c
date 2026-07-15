@@ -25,6 +25,7 @@
 #include "uvc_check_priv.h"
 #include "uvc_critical_priv.h"
 #include "uvc_idf_version_priv.h"
+#include "uvc_isoc_priv.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -347,10 +348,18 @@ static void uvc_client_task(void *arg)
 static void uvc_transfers_free(uvc_stream_t *uvc_stream)
 {
     assert(uvc_stream);
+    if (!uvc_stream->constant.xfers) {
+        return;
+    }
     for (unsigned i = 0; i < uvc_stream->constant.num_of_xfers; i++) {
-        usb_host_transfer_free(uvc_stream->constant.xfers[i]);
+        if (uvc_stream->constant.xfers[i]) {
+            usb_host_transfer_free(uvc_stream->constant.xfers[i]);
+            uvc_stream->constant.xfers[i] = NULL;
+        }
     }
     free(uvc_stream->constant.xfers);
+    uvc_stream->constant.xfers = NULL;
+    uvc_stream->constant.num_of_xfers = 0;
 }
 
 /**
@@ -400,7 +409,7 @@ static esp_err_t uvc_transfers_allocate(uvc_stream_t *uvc_stream, unsigned num_o
              num_of_transfers, is_isoc ? "ISOC" : "BULK", transfer_size, num_isoc_packets, max_packet_size);
 
     // Allocate array of transfers
-    uvc_stream->constant.xfers = malloc(num_of_transfers * sizeof(usb_transfer_t *));
+    uvc_stream->constant.xfers = calloc(num_of_transfers, sizeof(usb_transfer_t *));
     UVC_CHECK(uvc_stream->constant.xfers, ESP_ERR_NO_MEM);
 
     // Allocate and init all the transfers
@@ -445,6 +454,7 @@ err:
 static void uvc_device_remove(uvc_stream_t *uvc_stream)
 {
     assert(uvc_stream);
+    uvc_isoc_diagnostics_stop(uvc_stream);
     uvc_transfers_free(uvc_stream);
     uvc_frame_free(uvc_stream);
     // We don't check the error code of usb_host_device_close, as the close might fail, if someone else is still using the device (not all interfaces are released)
@@ -869,6 +879,11 @@ esp_err_t uvc_host_stream_open(const uvc_host_stream_config_t *stream_config, in
     uvc_stream->constant.stream_cb = stream_config->event_cb;
     uvc_stream->constant.frame_cb = stream_config->frame_cb;
     uvc_stream->constant.cb_arg = stream_config->user_ctx;
+
+    esp_err_t diagnostics_ret = uvc_isoc_diagnostics_start(uvc_stream);
+    if (diagnostics_ret != ESP_OK) {
+        ESP_LOGW(TAG, "UVC ISOC diagnostics disabled: %s", esp_err_to_name(diagnostics_ret));
+    }
 
     // Everything OK, add the device into list
     UVC_ENTER_CRITICAL();

@@ -20,6 +20,7 @@
 #include "esp_netif.h"
 #include "esp_system.h"
 #include "esp_video_device.h"
+#include "linux/videodev2.h"
 #include "lwip/apps/netbiosns.h"
 #include "mdns.h"
 #include "nvs_flash.h"
@@ -246,6 +247,8 @@ static esp_err_t http_server_init(void)
     return ESP_OK;
 }
 
+static void usb_dual_retry_task(void *arg);
+
 static esp_err_t start_camera_sources(void)
 {
     const camera_source_config_t configs[] = {
@@ -267,6 +270,8 @@ static esp_err_t start_camera_sources(void)
             .dev_name = ESP_VIDEO_USB_UVC_DEVICE_NAME(0),
             .width = CAMERA_SOURCE_USB_WIDTH,
             .height = CAMERA_SOURCE_USB_HEIGHT,
+            .target_pixel_format = V4L2_PIX_FMT_YUYV,
+            .target_frame_rate = 10,
             .jpeg_quality = USB_JPEG_QUALITY,
             .frame_cb = camera_frame_cb,
         },
@@ -276,6 +281,8 @@ static esp_err_t start_camera_sources(void)
             .dev_name = ESP_VIDEO_USB_UVC_DEVICE_NAME(1),
             .width = CAMERA_SOURCE_USB_WIDTH,
             .height = CAMERA_SOURCE_USB_HEIGHT,
+            .target_pixel_format = V4L2_PIX_FMT_YUYV,
+            .target_frame_rate = 10,
             .jpeg_quality = USB_JPEG_QUALITY,
             .frame_cb = camera_frame_cb,
         },
@@ -283,7 +290,13 @@ static esp_err_t start_camera_sources(void)
     };
 
     int valid_count = 0;
+    bool has_usb = false;
     for (int i = 0; i < sizeof(configs) / sizeof(configs[0]) && i < CAMERA_SOURCE_COUNT_MAX; i++) {
+        if (configs[i].kind == CAMERA_SOURCE_KIND_USB_UVC) {
+            has_usb = true;
+            continue; /* USB cameras started atomically below */
+        }
+
         camera_source_t *source = NULL;
         esp_err_t ret = camera_source_create(&configs[i], &source);
         if (ret != ESP_OK) {
@@ -303,9 +316,76 @@ static esp_err_t start_camera_sources(void)
     }
 
     s_source_count = CAMERA_SOURCE_COUNT_MAX;
-    ESP_LOGI(TAG, "camera init summary: configured=%d valid=%d",
+    ESP_LOGI(TAG, "camera init summary: configured=%d valid=%d (USB deferred)",
              (int)(sizeof(configs) / sizeof(configs[0])), valid_count);
+
+    if (has_usb) {
+        xTaskCreate(usb_dual_retry_task, "usb_dual_retry", 4096, NULL, 5, NULL);
+    }
+
     return valid_count > 0 ? ESP_OK : ESP_ERR_NOT_FOUND;
+}
+
+static bool s_usb_dual_ready = false;
+
+static void usb_dual_retry_task(void *arg)
+{
+    const camera_source_config_t usb_configs[2] = {
+        {
+            .camera_id = 1,
+            .kind = CAMERA_SOURCE_KIND_USB_UVC,
+            .dev_name = ESP_VIDEO_USB_UVC_DEVICE_NAME(0),
+            .width = CAMERA_SOURCE_USB_WIDTH,
+            .height = CAMERA_SOURCE_USB_HEIGHT,
+            .target_pixel_format = V4L2_PIX_FMT_YUYV,
+            .target_frame_rate = 10,
+            .jpeg_quality = USB_JPEG_QUALITY,
+            .frame_cb = camera_frame_cb,
+        },
+        {
+            .camera_id = 2,
+            .kind = CAMERA_SOURCE_KIND_USB_UVC,
+            .dev_name = ESP_VIDEO_USB_UVC_DEVICE_NAME(1),
+            .width = CAMERA_SOURCE_USB_WIDTH,
+            .height = CAMERA_SOURCE_USB_HEIGHT,
+            .target_pixel_format = V4L2_PIX_FMT_YUYV,
+            .target_frame_rate = 10,
+            .jpeg_quality = USB_JPEG_QUALITY,
+            .frame_cb = camera_frame_cb,
+        },
+    };
+
+    while (!s_usb_dual_ready) {
+        camera_source_t *srcs[2] = {NULL, NULL};
+        bool both_ok = true;
+
+        for (int i = 0; i < 2; i++) {
+            if (camera_source_create(&usb_configs[i], &srcs[i]) != ESP_OK) {
+                both_ok = false;
+                break;
+            }
+            if (camera_source_start(srcs[i]) != ESP_OK) {
+                both_ok = false;
+                break;
+            }
+        }
+
+        if (both_ok) {
+            s_sources[1] = srcs[0];
+            s_sources[2] = srcs[1];
+            s_usb_dual_ready = true;
+            ESP_LOGI(TAG, "Dual USB cameras ready");
+        } else {
+            for (int i = 0; i < 2; i++) {
+                if (srcs[i]) {
+                    camera_source_destroy(srcs[i]);
+                }
+            }
+            ESP_LOGW(TAG, "Dual USB init failed, retrying in 2s");
+            vTaskDelay(pdMS_TO_TICKS(2000));
+        }
+    }
+    vTaskDelete(NULL);
 }
 
 static void initialise_mdns(void)

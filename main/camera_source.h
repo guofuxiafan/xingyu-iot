@@ -36,6 +36,8 @@ typedef struct {
     const char *dev_name;
     uint32_t width;
     uint32_t height;
+    uint32_t target_pixel_format;
+    uint32_t target_frame_rate;
     uint8_t jpeg_quality;
     camera_source_frame_cb_t frame_cb;
     void *user_ctx;
