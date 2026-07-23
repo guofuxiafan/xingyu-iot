@@ -35,3 +35,7 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# Camera frames saved by the local WebSocket receiver
+imagebase/ws_frames_m/
+imagebase/ws_frames_l/
