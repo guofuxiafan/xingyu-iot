@@ -532,6 +532,7 @@ void app_main(void)
     ESP_ERROR_CHECK(example_video_init());
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+    ESP_ERROR_CHECK(provisioning_button_init());
 
     if (!wifi_cred_store_is_provisioned()) {
         ESP_LOGI(TAG, "NVS not provisioned, entering AP provisioning mode");
@@ -539,7 +540,14 @@ void app_main(void)
         return;
     }
 
-    ESP_ERROR_CHECK(sta_connect_from_nvs());
+    esp_err_t sta_ret = sta_connect_from_nvs();
+    if (sta_ret != ESP_OK) {
+        ESP_LOGW(TAG, "STA connect failed, clearing saved WiFi credentials and restarting into AP provisioning mode");
+        ESP_ERROR_CHECK(wifi_cred_store_erase());
+        vTaskDelay(pdMS_TO_TICKS(500));
+        esp_restart();
+        return;
+    }
 
     char pc_ip[16] = {0};
     ESP_ERROR_CHECK(wifi_cred_store_load_pc_ip(pc_ip, sizeof(pc_ip)));
@@ -579,7 +587,7 @@ void app_main(void)
     netbiosns_init();
     netbiosns_set_name(EXAMPLE_MDNS_HOST_NAME);
 
-    provisioning_button_init();
+    ESP_ERROR_CHECK(provisioning_button_init());
 
     if (wifi_cred_store_is_provisioned()) {
         esp_err_t sta_ret = sta_connect_from_nvs();
@@ -599,9 +607,11 @@ void app_main(void)
 
             ESP_LOGI(TAG, "Camera web server starts");
         } else {
-            ESP_LOGW(TAG, "STA connect failed after retries, restarting to retry...");
-            vTaskDelay(pdMS_TO_TICKS(2000));
+            ESP_LOGW(TAG, "STA connect failed, clearing saved WiFi credentials and restarting into AP provisioning mode");
+            ESP_ERROR_CHECK(wifi_cred_store_erase());
+            vTaskDelay(pdMS_TO_TICKS(500));
             esp_restart();
+            return;
         }
     } else {
         ESP_LOGI(TAG, "NVS not provisioned, entering AP provisioning mode");
