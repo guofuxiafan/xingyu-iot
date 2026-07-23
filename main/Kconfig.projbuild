@@ -23,7 +23,7 @@ menu "Example Configuration"
         default n
         help
             Reject a camera connected directly to the USB root port. Map a
-            single camera on HUB port 1 or port 3 to cam1 while keeping the
+            single camera on Waveshare HOST port 2, 3, or 4 to cam1 while keeping the
             Wi-Fi/WebSocket validation configuration unchanged.
 
     config EXAMPLE_USB_CSI_NETWORK_VALIDATION_MODE
@@ -32,16 +32,17 @@ menu "Example Configuration"
         default n
         help
             Start cam0 CSI together with the single cam1 USB stream and send
-            both over WebSocket. HTTP, mDNS, provisioning and remote logging
-            remain disabled.
+            both over WebSocket. Cam1 may use the direct Type-A port selected
+            by the DEVICE jumper or a CH334 port selected by HOST. HTTP, mDNS,
+            provisioning and remote logging remain disabled.
 
     config EXAMPLE_DUAL_USB_NETWORK_VALIDATION_MODE
         bool "Enable dual USB cameras during Wi-Fi/WebSocket validation"
         depends on EXAMPLE_USB_NETWORK_VALIDATION_MODE
         default n
         help
-            Start cam1 on HUB port 1 and cam2 on HUB port 3. CSI, HTTP, mDNS,
-            provisioning and remote logging remain disabled.
+            Start cam1 and cam2 from any two Waveshare HOST ports 2-4. CSI,
+            HTTP, mDNS, provisioning and remote logging remain disabled.
     
     config EXAMPLE_CAMERA_VIDEO_BUFFER_NUMBER
         int "CSI camera video buffer number"

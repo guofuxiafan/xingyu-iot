@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2024-2025 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2024-2026 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -59,6 +59,9 @@ static const char TAG[] = "spi_hd_wrapper";
 // num data lines used in each phase: cmd = 1, addr = 2, dummy = 1, data = 2
 #define SPI_DUAL_FLAGS (SPI_TRANS_MODE_DIO | SPI_TRANS_MULTILINE_ADDR)
 
+// num data lines used in each phase: cmd = 1, addr = 1, dummy = 1, data = 1
+#define SPI_SINGLE_FLAGS (0)
+
 #define SPI_HD_FAIL_IF_NULL(x) do { \
 		if (!x) return ESP_FAIL;  \
 	} while (0);
@@ -86,8 +89,15 @@ static void * spi_hd_bus_lock;
 DRAM_DMA_ALIGNED_ATTR static uint8_t dma_data_buf[DMA_ALIGNED_BUF_LEN];
 #endif
 
-// initially we start off using 2 data lines
+// initially we start off using 2 or 1 data lines
+// reconfigure later depending on number of data lines co-processor supports
+#if (H_SPI_HD_HOST_NUM_DATA_LINES == 4)
 static uint32_t spi_hd_rx_tx_flags = SPI_DUAL_FLAGS;
+#elif (H_SPI_HD_HOST_NUM_DATA_LINES == 2)
+static uint32_t spi_hd_rx_tx_flags = SPI_DUAL_FLAGS;
+#else
+static uint32_t spi_hd_rx_tx_flags = SPI_SINGLE_FLAGS;
+#endif
 
 // returns the spi command to send based on the provided mode flags
 static uint16_t spi_hd_get_hd_command(spi_command_t cmd_t, uint32_t flags)
@@ -312,13 +322,8 @@ void * hosted_spi_hd_init(void)
 	spi_bus_config_t buscfg = {
 		.data0_io_num = H_SPI_HD_PIN_D0,
 		.data1_io_num = H_SPI_HD_PIN_D1,
-#if (H_SPI_HD_HOST_NUM_DATA_LINES == 4)
 		.data2_io_num = H_SPI_HD_PIN_D2,
 		.data3_io_num = H_SPI_HD_PIN_D3,
-#else
-		.data2_io_num = -1,
-		.data3_io_num = -1,
-#endif
 		/** set other data pins to -1 to prevent warnings about gpio
 		 *  conflict in ESP-IDF spi_common.c
 		 */
@@ -331,8 +336,10 @@ void * hosted_spi_hd_init(void)
 		.max_transfer_sz = MAX_SPI_HD_BUFFER_SIZE,
 #if (H_SPI_HD_HOST_NUM_DATA_LINES == 4)
 		.flags = (SPICOMMON_BUSFLAG_MASTER | SPICOMMON_BUSFLAG_QUAD),
-#else
+#elif (H_SPI_HD_HOST_NUM_DATA_LINES == 2)
 		.flags = (SPICOMMON_BUSFLAG_MASTER | SPICOMMON_BUSFLAG_DUAL),
+#else
+		.flags = SPICOMMON_BUSFLAG_MASTER,
 #endif
 		.intr_flags = 0,
 	};
@@ -350,7 +357,11 @@ void * hosted_spi_hd_init(void)
 		.address_bits = H_SPI_HD_NUM_ADDRESS_BITS,
 		.dummy_bits = H_SPI_HD_NUM_DUMMY_BITS,
 		.queue_size = 16,
+#if H_SPI_HD_HOST_NUM_DATA_LINES > 1
 		.flags = SPI_DEVICE_HALFDUPLEX,
+#else
+		.flags = SPI_DEVICE_HALFDUPLEX | SPI_DEVICE_3WIRE, // enable 1-bit mode support
+#endif
 		.duty_cycle_pos = 128, // 50% duty cycle
 		.input_delay_ns = 0,
 		.pre_cb = NULL,
@@ -526,13 +537,15 @@ int hosted_spi_hd_write_dma(uint8_t *data, uint16_t size, bool lock_required)
 
 int hosted_spi_hd_set_data_lines(uint32_t data_lines)
 {
-	if (data_lines == H_SPI_HD_CONFIG_2_DATA_LINES) {
-		ESP_LOGI(TAG, "use 2 data lines");
-		spi_hd_rx_tx_flags = SPI_DUAL_FLAGS;
-	} else
 	if (data_lines == H_SPI_HD_CONFIG_4_DATA_LINES) {
 		ESP_LOGI(TAG, "use 4 data lines");
 		spi_hd_rx_tx_flags = SPI_QUAD_FLAGS;
+	} else if (data_lines == H_SPI_HD_CONFIG_2_DATA_LINES) {
+		ESP_LOGI(TAG, "use 2 data lines");
+		spi_hd_rx_tx_flags = SPI_DUAL_FLAGS;
+	} else if (data_lines == H_SPI_HD_CONFIG_1_DATA_LINE) {
+		ESP_LOGI(TAG, "use 1 data line");
+		spi_hd_rx_tx_flags = SPI_SINGLE_FLAGS;
 	} else {
 		return ESP_FAIL;
 	}

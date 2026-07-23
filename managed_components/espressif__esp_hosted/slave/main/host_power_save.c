@@ -364,7 +364,7 @@ int wakeup_host(uint32_t timeout_ms)
 	}
 
 	if (!hps_config.enable) {
-		ESP_LOGW(TAG, "%s: host_power_save_init never called, ignore");
+		ESP_LOGW(TAG, "%s: host_power_save_init never called, ignore", __func__);
 		return 1;
 	}
 
@@ -405,7 +405,7 @@ int host_power_save_alert(uint32_t ps_evt)
 	BaseType_t do_yeild = pdFALSE;
 
 	if (!hps_config.enable) {
-		ESP_EARLY_LOGW(TAG, "%s: host_power_save_init never called, ignore");
+		ESP_EARLY_LOGW(TAG, "%s: host_power_save_init never called, ignore", __func__);
 		return 0;
 	}
 

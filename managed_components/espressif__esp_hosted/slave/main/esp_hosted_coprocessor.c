@@ -182,6 +182,9 @@ static uint32_t get_capabilities_ext(void)
 #elif (CONFIG_ESP_SPI_HD_INTERFACE_NUM_DATA_LINES == 2)
 	ESP_LOGI(TAG, "- SPI HD 2-bit interface");
 	ext_cap |= ESP_SPI_HD_INTERFACE_SUPPORT_2_DATA_LINES;
+#elif (CONFIG_ESP_SPI_HD_INTERFACE_NUM_DATA_LINES == 1)
+	ESP_LOGI(TAG, "- SPI HD 1-bit interface");
+	ext_cap |= ESP_SPI_HD_INTERFACE_SUPPORT_1_DATA_LINE;
 #else
 #error "Invalid SPI HD Number of Data Bits configuration"
 #endif

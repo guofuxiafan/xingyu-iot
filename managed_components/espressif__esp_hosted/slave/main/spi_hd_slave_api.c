@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <inttypes.h>
 
+#include "esp_idf_version.h"
 #include "driver/gpio.h"
 #include "driver/spi_slave_hd.h"
 
@@ -40,16 +41,26 @@ static const char TAG[] = "SPI_HD_DRIVER";
 /* SPI HD settings */
 #define NUM_DATA_BITS              CONFIG_ESP_SPI_HD_INTERFACE_NUM_DATA_LINES
 
+#if (NUM_DATA_BITS == 1) && (ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(6,1,0))
+#error "1-bit SPI-HD mode only supported in ESP-IDF v6.1 and above"
+#endif
+
 #define ESP_SPI_HD_MODE            CONFIG_ESP_SPI_HD_MODE
 #define GPIO_CS                    CONFIG_ESP_SPI_HD_GPIO_CS
 #define GPIO_SCLK                  CONFIG_ESP_SPI_HD_GPIO_CLK
 #define GPIO_D0                    CONFIG_ESP_SPI_HD_GPIO_D0
+#if (NUM_DATA_BITS >= 2)
 #define GPIO_D1                    CONFIG_ESP_SPI_HD_GPIO_D1
+#endif
 #if (NUM_DATA_BITS == 4)
 #define GPIO_D2                    CONFIG_ESP_SPI_HD_GPIO_D2
 #define GPIO_D3                    CONFIG_ESP_SPI_HD_GPIO_D3
 #endif
+#ifdef CONFIG_ESP_SPI_HD_DATA_READY_ENABLED
 #define GPIO_DATA_READY            CONFIG_ESP_SPI_HD_GPIO_DATA_READY
+#else
+#define GPIO_DATA_READY            (-1)
+#endif
 
 #define TX_MEMPOOL_NUM_BLOCKS      CONFIG_ESP_SPI_HD_Q_SIZE
 #define RX_MEMPOOL_NUM_BLOCKS      CONFIG_ESP_SPI_HD_Q_SIZE
@@ -85,6 +96,7 @@ static const char TAG[] = "SPI_HD_DRIVER";
 #define SPI_HD_BUFFER_SIZE          MAX_TRANSPORT_BUF_SIZE
 #define SPI_HD_QUEUE_SIZE           CONFIG_ESP_SPI_HD_Q_SIZE
 
+#ifdef CONFIG_ESP_SPI_HD_DATA_READY_ENABLED
 #define GPIO_MASK_DATA_READY        (1ULL << GPIO_DATA_READY)
 
 #if H_DATAREADY_ACTIVE_HIGH
@@ -104,6 +116,10 @@ static const char TAG[] = "SPI_HD_DRIVER";
   #define set_dataready_gpio()     { ESP_EARLY_LOGV(TAG, "set_dataready_gpio"); data_ready_gpio_active = true; gpio_set_level(GPIO_DATA_READY, 0); }
   #define reset_dataready_gpio()   { ESP_EARLY_LOGV(TAG, "reset_dataready_gpio"); gpio_set_level(GPIO_DATA_READY, 1); data_ready_gpio_active = false; }
 #endif
+#else /* !CONFIG_ESP_SPI_HD_DATA_READY_ENABLED */
+  #define set_dataready_gpio()     do {} while(0)
+  #define reset_dataready_gpio()   do {} while(0)
+#endif /* CONFIG_ESP_SPI_HD_DATA_READY_ENABLED */
 
 // for flow control
 static volatile uint8_t wifi_flow_ctrl = 0;
@@ -348,7 +364,11 @@ static void stop_rx_data_throttling_if_needed(void)
 static void esp_spi_hd_get_bus_cfg(spi_bus_config_t * bus_cfg)
 {
 	bus_cfg->data0_io_num = GPIO_D0;
+#if (NUM_DATA_BITS >= 2)
 	bus_cfg->data1_io_num = GPIO_D1;
+#else
+	bus_cfg->data1_io_num = -1;
+#endif
 #if (NUM_DATA_BITS == 4)
 	bus_cfg->data2_io_num = GPIO_D2;
 	bus_cfg->data3_io_num = GPIO_D3;
@@ -366,8 +386,10 @@ static void esp_spi_hd_get_bus_cfg(spi_bus_config_t * bus_cfg)
 	bus_cfg->max_transfer_sz = SPI_HD_BUFFER_SIZE;
 #if (NUM_DATA_BITS == 4)
 	bus_cfg->flags = SPICOMMON_BUSFLAG_QUAD;
-#else
+#elif (NUM_DATA_BITS == 2)
 	bus_cfg->flags = SPICOMMON_BUSFLAG_DUAL;
+#else
+	bus_cfg->flags = 0;
 #endif
 	bus_cfg->intr_flags = 0;
 }
@@ -375,7 +397,11 @@ static void esp_spi_hd_get_bus_cfg(spi_bus_config_t * bus_cfg)
 static void esp_spi_hd_get_slot_cfg(spi_slave_hd_slot_config_t * slot_cfg)
 {
 	slot_cfg->spics_io_num = GPIO_CS;
+#if NUM_DATA_BITS > 1
 	slot_cfg->flags = 0;
+#else
+	slot_cfg->flags = SPI_SLAVE_HD_3WIRE_MODE;  // enable 1-bit mode support
+#endif
 	slot_cfg->mode = ESP_SPI_HD_MODE;
 	slot_cfg->command_bits = NUM_COMMAND_BITS;
 	slot_cfg->address_bits = NUM_ADDRESS_BITS;
@@ -588,28 +614,28 @@ static interface_handle_t * esp_spi_hd_init(void)
 	uint16_t prio_q_idx = 0;
 	uint8_t init_value[SOC_SPI_MAXIMUM_BUFFER_SIZE] = {0x0}; // used to init SPI shared registers
 
-	spi_bus_config_t bus_cfg;
-	spi_slave_hd_slot_config_t slave_hd_cfg;
+	spi_bus_config_t bus_cfg = { 0 };
+	spi_slave_hd_slot_config_t slave_hd_cfg = { 0 };
 
+	// get SPI HD bus and slot configurations
+	esp_spi_hd_get_bus_cfg(&bus_cfg);
+	esp_spi_hd_get_slot_cfg(&slave_hd_cfg);
+
+#ifdef CONFIG_ESP_SPI_HD_DATA_READY_ENABLED
 	/* Configuration for data_ready line */
 	gpio_config_t io_data_ready_conf={
 		.intr_type = GPIO_INTR_DISABLE,
 		.mode = GPIO_MODE_OUTPUT,
 		.pin_bit_mask = GPIO_MASK_DATA_READY
 	};
-
-	// get SPI HD bus and slot configurations
-	esp_spi_hd_get_bus_cfg(&bus_cfg);
-	esp_spi_hd_get_slot_cfg(&slave_hd_cfg);
-
-	/* Configure data_ready line as output */
 	gpio_config(&io_data_ready_conf);
 	reset_dataready_gpio();
+	gpio_set_pull_mode(GPIO_DATA_READY, H_DR_PULL_REGISTER);
+#endif
 
 	/* Enable pull-ups on SPI lines
 	 * so that no rogue pulses when no master is connected
 	 */
-	gpio_set_pull_mode(GPIO_DATA_READY, H_DR_PULL_REGISTER);
 	gpio_set_pull_mode(GPIO_SCLK, GPIO_PULLUP_ONLY);
 	gpio_set_pull_mode(GPIO_CS, GPIO_PULLUP_ONLY);
 
@@ -617,19 +643,24 @@ static interface_handle_t * esp_spi_hd_init(void)
 			SPI_HOST, slave_hd_cfg.mode);
 #if (NUM_DATA_BITS == 4)
 	ESP_LOGI(TAG, "SPI HD GPIOs: Dat0: %"PRIu16 ", Dat1: %"PRIu16 ", Dat2: %"PRIu16
-			", Dat3: %"PRIu16 ", CS: %"PRIu16 ", CLK: %"PRIu16 ", Data Ready: %"PRIu16 ,
-			GPIO_D0, GPIO_D1, GPIO_D2, GPIO_D3, GPIO_CS, GPIO_SCLK, GPIO_DATA_READY);
-#else
+			", Dat3: %"PRIu16 ", CS: %"PRIu16 ", CLK: %"PRIu16,
+			GPIO_D0, GPIO_D1, GPIO_D2, GPIO_D3, GPIO_CS, GPIO_SCLK);
+#elif (NUM_DATA_BITS == 2)
 	ESP_LOGI(TAG, "SPI HD GPIOs: Dat0: %"PRIu16 ", Dat1: %"PRIu16
-			", CS: %"PRIu16 ", CLK: %"PRIu16 ", Data Ready: %"PRIu16 ,
-			GPIO_D0, GPIO_D1, GPIO_CS, GPIO_SCLK, GPIO_DATA_READY);
+			", CS: %"PRIu16 ", CLK: %"PRIu16,
+			GPIO_D0, GPIO_D1, GPIO_CS, GPIO_SCLK);
+#else
+	ESP_LOGI(TAG, "SPI HD GPIOs: Dat0: %"PRIu16
+			", CS: %"PRIu16 ", CLK: %"PRIu16,
+			GPIO_D0, GPIO_CS, GPIO_SCLK);
 #endif
 	ESP_LOGI(TAG, "Hosted SPI HD queue size:%"PRIu16, SPI_HD_QUEUE_SIZE);
 
-#if !H_DATAREADY_ACTIVE_HIGH
-	ESP_LOGI(TAG, "DataReady: Active Low");
+#ifdef CONFIG_ESP_SPI_HD_DATA_READY_ENABLED
+	ESP_LOGI(TAG, "DataReady GPIO: %"PRIu16 " (%s)",
+			GPIO_DATA_READY, H_DATAREADY_ACTIVE_HIGH ? "Active High" : "Active Low");
 #else
-	ESP_LOGI(TAG, "DataReady: Active High");
+	ESP_LOGI(TAG, "DataReady: Disabled (host polls)");
 #endif
 
 	/* Initialize SPI slave interface */

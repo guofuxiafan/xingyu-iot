@@ -582,7 +582,10 @@ static void capture_task(void *arg)
                                                     source->jpeg_out_size,
                                                     &jpeg_len);
             xSemaphoreGive(source->encoder_lock);
-            if (ret != ESP_OK || !is_complete_jpeg(source->jpeg_out_buf, jpeg_len)) {
+
+            if (ret != ESP_OK || jpeg_len < JPEG_MIN_SIZE ||
+                    jpeg_len > source->jpeg_out_size ||
+                    !is_complete_jpeg(source->jpeg_out_buf, jpeg_len)) {
                 log_drop_limited(source,
                                  &source->jpeg_encode_fail_count,
                                  &source->next_jpeg_encode_fail_log_ms,
@@ -591,10 +594,6 @@ static void capture_task(void *arg)
                 ioctl(source->fd, VIDIOC_QBUF, &buf);
                 continue;
             }
-            esp_cache_msync(source->jpeg_out_buf, source->jpeg_out_size,
-                            ESP_CACHE_MSYNC_FLAG_DIR_M2C |
-                            ESP_CACHE_MSYNC_FLAG_TYPE_DATA |
-                            ESP_CACHE_MSYNC_FLAG_INVALIDATE);
             jpeg_src = source->jpeg_out_buf;
         }
 

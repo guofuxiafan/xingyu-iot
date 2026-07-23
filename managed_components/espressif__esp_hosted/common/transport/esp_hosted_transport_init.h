@@ -34,6 +34,7 @@ typedef enum {
 	// spi hd capabilities
 	ESP_SPI_HD_INTERFACE_SUPPORT_2_DATA_LINES = (1 << 0),
 	ESP_SPI_HD_INTERFACE_SUPPORT_4_DATA_LINES = (1 << 1),
+	ESP_SPI_HD_INTERFACE_SUPPORT_1_DATA_LINE  = (1 << 2),
 	// leave a gap for future expansion
 
 	// features supported

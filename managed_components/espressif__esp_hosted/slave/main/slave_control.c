@@ -1282,6 +1282,10 @@ static esp_rpc_req_t req_table[] = {
 		.command_handler = req_wifi_get_inactive_time
 	},
 	{
+		.req_num = RPC_ID__Req_WifiDisablePmfConfig,
+		.command_handler = req_wifi_disable_pmf_config
+	},
+	{
 		.req_num = RPC_ID__Req_SetDhcpDnsStatus,
 		.command_handler = req_set_dhcp_dns_status
 	},

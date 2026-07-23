@@ -248,6 +248,11 @@ H_WEAK_REF esp_err_t esp_wifi_get_inactive_time(wifi_interface_t ifx, uint16_t *
 	return esp_wifi_remote_get_inactive_time(ifx, sec);
 }
 
+H_WEAK_REF esp_err_t esp_wifi_disable_pmf_config(wifi_interface_t ifx)
+{
+	return esp_wifi_remote_disable_pmf_config(ifx);
+}
+
 #if H_WIFI_HE_SUPPORT
 H_WEAK_REF esp_err_t esp_wifi_sta_twt_config(wifi_twt_config_t *config)
 {

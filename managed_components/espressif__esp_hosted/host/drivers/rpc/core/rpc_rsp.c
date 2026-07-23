@@ -555,6 +555,12 @@ int rpc_parse_rsp(Rpc *rpc_msg, ctrl_cmd_t *app_resp)
 		app_resp->u.wifi_inactive_time.sec =
 			rpc_msg->resp_wifi_get_inactive_time->sec;
 		break;
+	} case RPC_ID__Resp_WifiDisablePmfConfig: {
+		RPC_FAIL_ON_NULL(resp_wifi_disable_pmf_config);
+		RPC_ERR_IN_RESP(resp_wifi_disable_pmf_config);
+		app_resp->u.wifi_disable_pmf_config.ifx =
+			rpc_msg->resp_wifi_disable_pmf_config->ifx;
+		break;
 #if H_WIFI_HE_SUPPORT
 	} case RPC_ID__Resp_WifiStaTwtConfig: {
 		RPC_FAIL_ON_NULL(resp_wifi_sta_twt_config);

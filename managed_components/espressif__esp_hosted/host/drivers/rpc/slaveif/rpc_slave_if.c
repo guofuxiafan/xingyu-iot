@@ -358,6 +358,12 @@ ctrl_cmd_t * rpc_slaveif_wifi_get_inactive_time(ctrl_cmd_t *req)
 	RPC_DECODE_RSP_IF_NOT_ASYNC();
 }
 
+ctrl_cmd_t * rpc_slaveif_wifi_disable_pmf_config(ctrl_cmd_t *req)
+{
+	RPC_SEND_REQ(RPC_ID__Req_WifiDisablePmfConfig);
+	RPC_DECODE_RSP_IF_NOT_ASYNC();
+}
+
 #if H_WIFI_HE_SUPPORT
 ctrl_cmd_t * rpc_slaveif_wifi_sta_twt_config(ctrl_cmd_t *req)
 {

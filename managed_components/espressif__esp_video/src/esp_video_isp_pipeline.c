@@ -1354,10 +1354,6 @@ esp_err_t esp_video_isp_pipeline_init(const esp_video_isp_config_t *config)
     esp_video_isp_t *isp;
     esp_ipa_metadata_t metadata;
 
-#if LOG_LOCAL_LEVEL >= ESP_LOG_DEBUG
-    esp_log_level_set(TAG, ESP_LOG_DEBUG);
-#endif
-
     if (!config || !config->isp_dev || !config->cam_dev ||
             !config->ipa_config) {
         ESP_LOGE(TAG, "failed to check ISP configuration");

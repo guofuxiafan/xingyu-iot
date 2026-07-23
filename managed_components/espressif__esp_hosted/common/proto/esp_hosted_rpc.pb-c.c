@@ -7702,6 +7702,96 @@ void   rpc__resp__wifi_get_inactive_time__free_unpacked
   assert(message->base.descriptor == &rpc__resp__wifi_get_inactive_time__descriptor);
   protobuf_c_message_free_unpacked ((ProtobufCMessage*)message, allocator);
 }
+void   rpc__req__wifi_disable_pmf_config__init
+                     (RpcReqWifiDisablePmfConfig         *message)
+{
+  static const RpcReqWifiDisablePmfConfig init_value = RPC__REQ__WIFI_DISABLE_PMF_CONFIG__INIT;
+  *message = init_value;
+}
+size_t rpc__req__wifi_disable_pmf_config__get_packed_size
+                     (const RpcReqWifiDisablePmfConfig *message)
+{
+  assert(message->base.descriptor == &rpc__req__wifi_disable_pmf_config__descriptor);
+  return protobuf_c_message_get_packed_size ((const ProtobufCMessage*)(message));
+}
+size_t rpc__req__wifi_disable_pmf_config__pack
+                     (const RpcReqWifiDisablePmfConfig *message,
+                      uint8_t       *out)
+{
+  assert(message->base.descriptor == &rpc__req__wifi_disable_pmf_config__descriptor);
+  return protobuf_c_message_pack ((const ProtobufCMessage*)message, out);
+}
+size_t rpc__req__wifi_disable_pmf_config__pack_to_buffer
+                     (const RpcReqWifiDisablePmfConfig *message,
+                      ProtobufCBuffer *buffer)
+{
+  assert(message->base.descriptor == &rpc__req__wifi_disable_pmf_config__descriptor);
+  return protobuf_c_message_pack_to_buffer ((const ProtobufCMessage*)message, buffer);
+}
+RpcReqWifiDisablePmfConfig *
+       rpc__req__wifi_disable_pmf_config__unpack
+                     (ProtobufCAllocator  *allocator,
+                      size_t               len,
+                      const uint8_t       *data)
+{
+  return (RpcReqWifiDisablePmfConfig *)
+     protobuf_c_message_unpack (&rpc__req__wifi_disable_pmf_config__descriptor,
+                                allocator, len, data);
+}
+void   rpc__req__wifi_disable_pmf_config__free_unpacked
+                     (RpcReqWifiDisablePmfConfig *message,
+                      ProtobufCAllocator *allocator)
+{
+  if(!message)
+    return;
+  assert(message->base.descriptor == &rpc__req__wifi_disable_pmf_config__descriptor);
+  protobuf_c_message_free_unpacked ((ProtobufCMessage*)message, allocator);
+}
+void   rpc__resp__wifi_disable_pmf_config__init
+                     (RpcRespWifiDisablePmfConfig         *message)
+{
+  static const RpcRespWifiDisablePmfConfig init_value = RPC__RESP__WIFI_DISABLE_PMF_CONFIG__INIT;
+  *message = init_value;
+}
+size_t rpc__resp__wifi_disable_pmf_config__get_packed_size
+                     (const RpcRespWifiDisablePmfConfig *message)
+{
+  assert(message->base.descriptor == &rpc__resp__wifi_disable_pmf_config__descriptor);
+  return protobuf_c_message_get_packed_size ((const ProtobufCMessage*)(message));
+}
+size_t rpc__resp__wifi_disable_pmf_config__pack
+                     (const RpcRespWifiDisablePmfConfig *message,
+                      uint8_t       *out)
+{
+  assert(message->base.descriptor == &rpc__resp__wifi_disable_pmf_config__descriptor);
+  return protobuf_c_message_pack ((const ProtobufCMessage*)message, out);
+}
+size_t rpc__resp__wifi_disable_pmf_config__pack_to_buffer
+                     (const RpcRespWifiDisablePmfConfig *message,
+                      ProtobufCBuffer *buffer)
+{
+  assert(message->base.descriptor == &rpc__resp__wifi_disable_pmf_config__descriptor);
+  return protobuf_c_message_pack_to_buffer ((const ProtobufCMessage*)message, buffer);
+}
+RpcRespWifiDisablePmfConfig *
+       rpc__resp__wifi_disable_pmf_config__unpack
+                     (ProtobufCAllocator  *allocator,
+                      size_t               len,
+                      const uint8_t       *data)
+{
+  return (RpcRespWifiDisablePmfConfig *)
+     protobuf_c_message_unpack (&rpc__resp__wifi_disable_pmf_config__descriptor,
+                                allocator, len, data);
+}
+void   rpc__resp__wifi_disable_pmf_config__free_unpacked
+                     (RpcRespWifiDisablePmfConfig *message,
+                      ProtobufCAllocator *allocator)
+{
+  if(!message)
+    return;
+  assert(message->base.descriptor == &rpc__resp__wifi_disable_pmf_config__descriptor);
+  protobuf_c_message_free_unpacked ((ProtobufCMessage*)message, allocator);
+}
 void   rpc__req__wifi_sta_itwt_setup__init
                      (RpcReqWifiStaItwtSetup         *message)
 {
@@ -22488,6 +22578,95 @@ const ProtobufCMessageDescriptor rpc__resp__wifi_get_inactive_time__descriptor =
   (ProtobufCMessageInit) rpc__resp__wifi_get_inactive_time__init,
   NULL,NULL,NULL    /* reserved[123] */
 };
+static const ProtobufCFieldDescriptor rpc__req__wifi_disable_pmf_config__field_descriptors[1] =
+{
+  {
+    "ifx",
+    1,
+    PROTOBUF_C_LABEL_NONE,
+    PROTOBUF_C_TYPE_UINT32,
+    0,   /* quantifier_offset */
+    offsetof(RpcReqWifiDisablePmfConfig, ifx),
+    NULL,
+    NULL,
+    0,             /* flags */
+    0,NULL,NULL    /* reserved1,reserved2, etc */
+  },
+};
+static const unsigned rpc__req__wifi_disable_pmf_config__field_indices_by_name[] = {
+  0,   /* field[0] = ifx */
+};
+static const ProtobufCIntRange rpc__req__wifi_disable_pmf_config__number_ranges[1 + 1] =
+{
+  { 1, 0 },
+  { 0, 1 }
+};
+const ProtobufCMessageDescriptor rpc__req__wifi_disable_pmf_config__descriptor =
+{
+  PROTOBUF_C__MESSAGE_DESCRIPTOR_MAGIC,
+  "Rpc_Req_WifiDisablePmfConfig",
+  "RpcReqWifiDisablePmfConfig",
+  "RpcReqWifiDisablePmfConfig",
+  "",
+  sizeof(RpcReqWifiDisablePmfConfig),
+  1,
+  rpc__req__wifi_disable_pmf_config__field_descriptors,
+  rpc__req__wifi_disable_pmf_config__field_indices_by_name,
+  1,  rpc__req__wifi_disable_pmf_config__number_ranges,
+  (ProtobufCMessageInit) rpc__req__wifi_disable_pmf_config__init,
+  NULL,NULL,NULL    /* reserved[123] */
+};
+static const ProtobufCFieldDescriptor rpc__resp__wifi_disable_pmf_config__field_descriptors[2] =
+{
+  {
+    "resp",
+    1,
+    PROTOBUF_C_LABEL_NONE,
+    PROTOBUF_C_TYPE_INT32,
+    0,   /* quantifier_offset */
+    offsetof(RpcRespWifiDisablePmfConfig, resp),
+    NULL,
+    NULL,
+    0,             /* flags */
+    0,NULL,NULL    /* reserved1,reserved2, etc */
+  },
+  {
+    "ifx",
+    2,
+    PROTOBUF_C_LABEL_NONE,
+    PROTOBUF_C_TYPE_UINT32,
+    0,   /* quantifier_offset */
+    offsetof(RpcRespWifiDisablePmfConfig, ifx),
+    NULL,
+    NULL,
+    0,             /* flags */
+    0,NULL,NULL    /* reserved1,reserved2, etc */
+  },
+};
+static const unsigned rpc__resp__wifi_disable_pmf_config__field_indices_by_name[] = {
+  1,   /* field[1] = ifx */
+  0,   /* field[0] = resp */
+};
+static const ProtobufCIntRange rpc__resp__wifi_disable_pmf_config__number_ranges[1 + 1] =
+{
+  { 1, 0 },
+  { 0, 2 }
+};
+const ProtobufCMessageDescriptor rpc__resp__wifi_disable_pmf_config__descriptor =
+{
+  PROTOBUF_C__MESSAGE_DESCRIPTOR_MAGIC,
+  "Rpc_Resp_WifiDisablePmfConfig",
+  "RpcRespWifiDisablePmfConfig",
+  "RpcRespWifiDisablePmfConfig",
+  "",
+  sizeof(RpcRespWifiDisablePmfConfig),
+  2,
+  rpc__resp__wifi_disable_pmf_config__field_descriptors,
+  rpc__resp__wifi_disable_pmf_config__field_indices_by_name,
+  1,  rpc__resp__wifi_disable_pmf_config__number_ranges,
+  (ProtobufCMessageInit) rpc__resp__wifi_disable_pmf_config__init,
+  NULL,NULL,NULL    /* reserved[123] */
+};
 static const ProtobufCFieldDescriptor rpc__req__wifi_sta_itwt_setup__field_descriptors[1] =
 {
   {
@@ -28647,7 +28826,7 @@ const ProtobufCMessageDescriptor rpc__event__mem_monitor__descriptor =
   (ProtobufCMessageInit) rpc__event__mem_monitor__init,
   NULL,NULL,NULL    /* reserved[123] */
 };
-static const ProtobufCFieldDescriptor rpc__field_descriptors[246] =
+static const ProtobufCFieldDescriptor rpc__field_descriptors[248] =
 {
   {
     "msg_type",
@@ -29317,6 +29496,18 @@ static const ProtobufCFieldDescriptor rpc__field_descriptors[246] =
     offsetof(Rpc, payload_case),
     offsetof(Rpc, req_wifi_get_country_code),
     &rpc__req__wifi_get_country_code__descriptor,
+    NULL,
+    0 | PROTOBUF_C_FIELD_FLAG_ONEOF,             /* flags */
+    0,NULL,NULL    /* reserved1,reserved2, etc */
+  },
+  {
+    "req_wifi_disable_pmf_config",
+    337,
+    PROTOBUF_C_LABEL_NONE,
+    PROTOBUF_C_TYPE_MESSAGE,
+    offsetof(Rpc, payload_case),
+    offsetof(Rpc, req_wifi_disable_pmf_config),
+    &rpc__req__wifi_disable_pmf_config__descriptor,
     NULL,
     0 | PROTOBUF_C_FIELD_FLAG_ONEOF,             /* flags */
     0,NULL,NULL    /* reserved1,reserved2, etc */
@@ -30654,6 +30845,18 @@ static const ProtobufCFieldDescriptor rpc__field_descriptors[246] =
     0,NULL,NULL    /* reserved1,reserved2, etc */
   },
   {
+    "resp_wifi_disable_pmf_config",
+    593,
+    PROTOBUF_C_LABEL_NONE,
+    PROTOBUF_C_TYPE_MESSAGE,
+    offsetof(Rpc, payload_case),
+    offsetof(Rpc, resp_wifi_disable_pmf_config),
+    &rpc__resp__wifi_disable_pmf_config__descriptor,
+    NULL,
+    0 | PROTOBUF_C_FIELD_FLAG_ONEOF,             /* flags */
+    0,NULL,NULL    /* reserved1,reserved2, etc */
+  },
+  {
     "resp_wifi_sta_get_aid",
     594,
     PROTOBUF_C_LABEL_NONE,
@@ -31603,75 +31806,75 @@ static const ProtobufCFieldDescriptor rpc__field_descriptors[246] =
   },
 };
 static const unsigned rpc__field_indices_by_name[] = {
-  227,   /* field[227] = event_ap_sta_connected */
-  228,   /* field[228] = event_ap_sta_disconnected */
-  244,   /* field[244] = event_custom_rpc */
-  233,   /* field[233] = event_dhcp_dns */
-  225,   /* field[225] = event_esp_init */
-  226,   /* field[226] = event_heartbeat */
-  245,   /* field[245] = event_mem_monitor */
-  231,   /* field[231] = event_sta_connected */
-  232,   /* field[232] = event_sta_disconnected */
-  237,   /* field[237] = event_sta_itwt_probe */
-  234,   /* field[234] = event_sta_itwt_setup */
-  236,   /* field[236] = event_sta_itwt_suspend */
-  235,   /* field[235] = event_sta_itwt_teardown */
-  230,   /* field[230] = event_sta_scan_done */
-  239,   /* field[239] = event_supp_dpp_cfg_recvd */
-  240,   /* field[240] = event_supp_dpp_fail */
-  238,   /* field[238] = event_supp_dpp_uri_ready */
-  242,   /* field[242] = event_wifi_dpp_cfg_recvd */
-  243,   /* field[243] = event_wifi_dpp_fail */
-  241,   /* field[241] = event_wifi_dpp_uri_ready */
-  229,   /* field[229] = event_wifi_event_no_args */
+  229,   /* field[229] = event_ap_sta_connected */
+  230,   /* field[230] = event_ap_sta_disconnected */
+  246,   /* field[246] = event_custom_rpc */
+  235,   /* field[235] = event_dhcp_dns */
+  227,   /* field[227] = event_esp_init */
+  228,   /* field[228] = event_heartbeat */
+  247,   /* field[247] = event_mem_monitor */
+  233,   /* field[233] = event_sta_connected */
+  234,   /* field[234] = event_sta_disconnected */
+  239,   /* field[239] = event_sta_itwt_probe */
+  236,   /* field[236] = event_sta_itwt_setup */
+  238,   /* field[238] = event_sta_itwt_suspend */
+  237,   /* field[237] = event_sta_itwt_teardown */
+  232,   /* field[232] = event_sta_scan_done */
+  241,   /* field[241] = event_supp_dpp_cfg_recvd */
+  242,   /* field[242] = event_supp_dpp_fail */
+  240,   /* field[240] = event_supp_dpp_uri_ready */
+  244,   /* field[244] = event_wifi_dpp_cfg_recvd */
+  245,   /* field[245] = event_wifi_dpp_fail */
+  243,   /* field[243] = event_wifi_dpp_uri_ready */
+  231,   /* field[231] = event_wifi_event_no_args */
   1,   /* field[1] = msg_id */
   0,   /* field[0] = msg_type */
   13,   /* field[13] = req_app_get_desc */
   23,   /* field[23] = req_config_heartbeat */
-  105,   /* field[105] = req_custom_rpc */
-  89,   /* field[89] = req_eap_clear_ca_cert */
-  91,   /* field[91] = req_eap_clear_certificate_and_key */
-  81,   /* field[81] = req_eap_clear_identity */
-  87,   /* field[87] = req_eap_clear_new_password */
-  85,   /* field[85] = req_eap_clear_password */
-  83,   /* field[83] = req_eap_clear_username */
-  92,   /* field[92] = req_eap_get_disable_time_check */
-  88,   /* field[88] = req_eap_set_ca_cert */
-  90,   /* field[90] = req_eap_set_certificate_and_key */
-  100,   /* field[100] = req_eap_set_disable_time_check */
-  99,   /* field[99] = req_eap_set_domain_name */
-  101,   /* field[101] = req_eap_set_eap_methods */
-  96,   /* field[96] = req_eap_set_fast_params */
-  80,   /* field[80] = req_eap_set_identity */
-  86,   /* field[86] = req_eap_set_new_password */
-  95,   /* field[95] = req_eap_set_pac_file */
-  84,   /* field[84] = req_eap_set_password */
-  94,   /* field[94] = req_eap_set_suiteb_certification */
-  93,   /* field[93] = req_eap_set_ttls_phase2_method */
-  82,   /* field[82] = req_eap_set_username */
-  97,   /* field[97] = req_eap_use_default_cert_bundle */
-  113,   /* field[113] = req_ext_coex */
-  104,   /* field[104] = req_feature_control */
-  67,   /* field[67] = req_get_coprocessor_fwversion */
-  70,   /* field[70] = req_get_dhcp_dns */
+  106,   /* field[106] = req_custom_rpc */
+  90,   /* field[90] = req_eap_clear_ca_cert */
+  92,   /* field[92] = req_eap_clear_certificate_and_key */
+  82,   /* field[82] = req_eap_clear_identity */
+  88,   /* field[88] = req_eap_clear_new_password */
+  86,   /* field[86] = req_eap_clear_password */
+  84,   /* field[84] = req_eap_clear_username */
+  93,   /* field[93] = req_eap_get_disable_time_check */
+  89,   /* field[89] = req_eap_set_ca_cert */
+  91,   /* field[91] = req_eap_set_certificate_and_key */
+  101,   /* field[101] = req_eap_set_disable_time_check */
+  100,   /* field[100] = req_eap_set_domain_name */
+  102,   /* field[102] = req_eap_set_eap_methods */
+  97,   /* field[97] = req_eap_set_fast_params */
+  81,   /* field[81] = req_eap_set_identity */
+  87,   /* field[87] = req_eap_set_new_password */
+  96,   /* field[96] = req_eap_set_pac_file */
+  85,   /* field[85] = req_eap_set_password */
+  95,   /* field[95] = req_eap_set_suiteb_certification */
+  94,   /* field[94] = req_eap_set_ttls_phase2_method */
+  83,   /* field[83] = req_eap_set_username */
+  98,   /* field[98] = req_eap_use_default_cert_bundle */
+  114,   /* field[114] = req_ext_coex */
+  105,   /* field[105] = req_feature_control */
+  68,   /* field[68] = req_get_coprocessor_fwversion */
+  71,   /* field[71] = req_get_dhcp_dns */
   3,   /* field[3] = req_get_mac_address */
   22,   /* field[22] = req_get_wifi_max_tx_power */
   5,   /* field[5] = req_get_wifi_mode */
-  106,   /* field[106] = req_gpio_config */
-  109,   /* field[109] = req_gpio_get_level */
-  111,   /* field[111] = req_gpio_input_enable */
-  107,   /* field[107] = req_gpio_reset_pin */
-  110,   /* field[110] = req_gpio_set_direction */
-  108,   /* field[108] = req_gpio_set_level */
-  112,   /* field[112] = req_gpio_set_pull_mode */
-  103,   /* field[103] = req_iface_mac_addr_len_get */
-  102,   /* field[102] = req_iface_mac_addr_set_get */
+  107,   /* field[107] = req_gpio_config */
+  110,   /* field[110] = req_gpio_get_level */
+  112,   /* field[112] = req_gpio_input_enable */
+  108,   /* field[108] = req_gpio_reset_pin */
+  111,   /* field[111] = req_gpio_set_direction */
+  109,   /* field[109] = req_gpio_set_level */
+  113,   /* field[113] = req_gpio_set_pull_mode */
+  104,   /* field[104] = req_iface_mac_addr_len_get */
+  103,   /* field[103] = req_iface_mac_addr_set_get */
   14,   /* field[14] = req_mem_monitor */
   12,   /* field[12] = req_ota_activate */
   18,   /* field[18] = req_ota_begin */
   20,   /* field[20] = req_ota_end */
   19,   /* field[19] = req_ota_write */
-  69,   /* field[69] = req_set_dhcp_dns */
+  70,   /* field[70] = req_set_dhcp_dns */
   4,   /* field[4] = req_set_mac_address */
   21,   /* field[21] = req_set_wifi_max_tx_power */
   6,   /* field[6] = req_set_wifi_mode */
@@ -31687,167 +31890,169 @@ static const unsigned rpc__field_indices_by_name[] = {
   28,   /* field[28] = req_wifi_connect */
   39,   /* field[39] = req_wifi_deauth_sta */
   25,   /* field[25] = req_wifi_deinit */
+  56,   /* field[56] = req_wifi_disable_pmf_config */
   29,   /* field[29] = req_wifi_disconnect */
-  64,   /* field[64] = req_wifi_get_band */
-  66,   /* field[66] = req_wifi_get_bandmode */
+  65,   /* field[65] = req_wifi_get_band */
+  67,   /* field[67] = req_wifi_get_bandmode */
   44,   /* field[44] = req_wifi_get_bandwidth */
-  62,   /* field[62] = req_wifi_get_bandwidths */
+  63,   /* field[63] = req_wifi_get_bandwidths */
   46,   /* field[46] = req_wifi_get_channel */
   31,   /* field[31] = req_wifi_get_config */
   48,   /* field[48] = req_wifi_get_country */
   55,   /* field[55] = req_wifi_get_country_code */
   53,   /* field[53] = req_wifi_get_inactive_time */
   42,   /* field[42] = req_wifi_get_protocol */
-  60,   /* field[60] = req_wifi_get_protocols */
+  61,   /* field[61] = req_wifi_get_protocols */
   17,   /* field[17] = req_wifi_get_ps */
   24,   /* field[24] = req_wifi_init */
   37,   /* field[37] = req_wifi_restore */
   34,   /* field[34] = req_wifi_scan_get_ap_num */
-  68,   /* field[68] = req_wifi_scan_get_ap_record */
+  69,   /* field[69] = req_wifi_scan_get_ap_record */
   35,   /* field[35] = req_wifi_scan_get_ap_records */
   15,   /* field[15] = req_wifi_scan_params */
   32,   /* field[32] = req_wifi_scan_start */
   33,   /* field[33] = req_wifi_scan_stop */
-  63,   /* field[63] = req_wifi_set_band */
-  65,   /* field[65] = req_wifi_set_bandmode */
+  64,   /* field[64] = req_wifi_set_band */
+  66,   /* field[66] = req_wifi_set_bandmode */
   43,   /* field[43] = req_wifi_set_bandwidth */
-  61,   /* field[61] = req_wifi_set_bandwidths */
+  62,   /* field[62] = req_wifi_set_bandwidths */
   45,   /* field[45] = req_wifi_set_channel */
   30,   /* field[30] = req_wifi_set_config */
   47,   /* field[47] = req_wifi_set_country */
   54,   /* field[54] = req_wifi_set_country_code */
   52,   /* field[52] = req_wifi_set_inactive_time */
-  98,   /* field[98] = req_wifi_set_okc_support */
+  99,   /* field[99] = req_wifi_set_okc_support */
   41,   /* field[41] = req_wifi_set_protocol */
-  59,   /* field[59] = req_wifi_set_protocols */
+  60,   /* field[60] = req_wifi_set_protocols */
   16,   /* field[16] = req_wifi_set_ps */
   51,   /* field[51] = req_wifi_set_storage */
-  79,   /* field[79] = req_wifi_sta_enterprise_disable */
-  78,   /* field[78] = req_wifi_sta_enterprise_enable */
-  56,   /* field[56] = req_wifi_sta_get_aid */
+  80,   /* field[80] = req_wifi_sta_enterprise_disable */
+  79,   /* field[79] = req_wifi_sta_enterprise_enable */
+  57,   /* field[57] = req_wifi_sta_get_aid */
   40,   /* field[40] = req_wifi_sta_get_ap_info */
-  57,   /* field[57] = req_wifi_sta_get_negotiated_phymode */
-  58,   /* field[58] = req_wifi_sta_get_rssi */
-  75,   /* field[75] = req_wifi_sta_itwt_get_flow_id_status */
-  76,   /* field[76] = req_wifi_sta_itwt_send_probe_req */
-  77,   /* field[77] = req_wifi_sta_itwt_set_target_wake_time_offset */
-  72,   /* field[72] = req_wifi_sta_itwt_setup */
-  74,   /* field[74] = req_wifi_sta_itwt_suspend */
-  73,   /* field[73] = req_wifi_sta_itwt_teardown */
-  71,   /* field[71] = req_wifi_sta_twt_config */
+  58,   /* field[58] = req_wifi_sta_get_negotiated_phymode */
+  59,   /* field[59] = req_wifi_sta_get_rssi */
+  76,   /* field[76] = req_wifi_sta_itwt_get_flow_id_status */
+  77,   /* field[77] = req_wifi_sta_itwt_send_probe_req */
+  78,   /* field[78] = req_wifi_sta_itwt_set_target_wake_time_offset */
+  73,   /* field[73] = req_wifi_sta_itwt_setup */
+  75,   /* field[75] = req_wifi_sta_itwt_suspend */
+  74,   /* field[74] = req_wifi_sta_itwt_teardown */
+  72,   /* field[72] = req_wifi_sta_twt_config */
   26,   /* field[26] = req_wifi_start */
   27,   /* field[27] = req_wifi_stop */
-  124,   /* field[124] = resp_app_get_desc */
-  134,   /* field[134] = resp_config_heartbeat */
-  216,   /* field[216] = resp_custom_rpc */
-  200,   /* field[200] = resp_eap_clear_ca_cert */
-  202,   /* field[202] = resp_eap_clear_certificate_and_key */
-  192,   /* field[192] = resp_eap_clear_identity */
-  198,   /* field[198] = resp_eap_clear_new_password */
-  196,   /* field[196] = resp_eap_clear_password */
-  194,   /* field[194] = resp_eap_clear_username */
-  203,   /* field[203] = resp_eap_get_disable_time_check */
-  199,   /* field[199] = resp_eap_set_ca_cert */
-  201,   /* field[201] = resp_eap_set_certificate_and_key */
-  211,   /* field[211] = resp_eap_set_disable_time_check */
-  210,   /* field[210] = resp_eap_set_domain_name */
-  212,   /* field[212] = resp_eap_set_eap_methods */
-  207,   /* field[207] = resp_eap_set_fast_params */
-  191,   /* field[191] = resp_eap_set_identity */
-  197,   /* field[197] = resp_eap_set_new_password */
-  206,   /* field[206] = resp_eap_set_pac_file */
-  195,   /* field[195] = resp_eap_set_password */
-  205,   /* field[205] = resp_eap_set_suiteb_certification */
-  204,   /* field[204] = resp_eap_set_ttls_phase2_method */
-  193,   /* field[193] = resp_eap_set_username */
-  208,   /* field[208] = resp_eap_use_default_cert_bundle */
-  224,   /* field[224] = resp_ext_coex */
-  215,   /* field[215] = resp_feature_control */
-  178,   /* field[178] = resp_get_coprocessor_fwversion */
-  181,   /* field[181] = resp_get_dhcp_dns */
-  114,   /* field[114] = resp_get_mac_address */
-  133,   /* field[133] = resp_get_wifi_max_tx_power */
-  116,   /* field[116] = resp_get_wifi_mode */
-  217,   /* field[217] = resp_gpio_config */
-  220,   /* field[220] = resp_gpio_get_level */
-  222,   /* field[222] = resp_gpio_input_enable */
-  218,   /* field[218] = resp_gpio_reset */
-  221,   /* field[221] = resp_gpio_set_direction */
-  219,   /* field[219] = resp_gpio_set_level */
-  223,   /* field[223] = resp_gpio_set_pull_mode */
-  214,   /* field[214] = resp_iface_mac_addr_len_get */
-  213,   /* field[213] = resp_iface_mac_addr_set_get */
-  125,   /* field[125] = resp_mem_monitor */
-  123,   /* field[123] = resp_ota_activate */
-  129,   /* field[129] = resp_ota_begin */
-  131,   /* field[131] = resp_ota_end */
-  130,   /* field[130] = resp_ota_write */
-  180,   /* field[180] = resp_set_dhcp_dns */
-  115,   /* field[115] = resp_set_mac_address */
-  132,   /* field[132] = resp_set_wifi_max_tx_power */
-  117,   /* field[117] = resp_set_wifi_mode */
-  120,   /* field[120] = resp_supp_dpp_bootstrap_gen */
-  119,   /* field[119] = resp_supp_dpp_deinit */
-  118,   /* field[118] = resp_supp_dpp_init */
-  121,   /* field[121] = resp_supp_dpp_start_listen */
-  122,   /* field[122] = resp_supp_dpp_stop_listen */
-  161,   /* field[161] = resp_wifi_ap_get_sta_aid */
-  160,   /* field[160] = resp_wifi_ap_get_sta_list */
-  147,   /* field[147] = resp_wifi_clear_ap_list */
-  149,   /* field[149] = resp_wifi_clear_fast_connect */
-  139,   /* field[139] = resp_wifi_connect */
-  150,   /* field[150] = resp_wifi_deauth_sta */
-  136,   /* field[136] = resp_wifi_deinit */
-  140,   /* field[140] = resp_wifi_disconnect */
-  175,   /* field[175] = resp_wifi_get_band */
-  177,   /* field[177] = resp_wifi_get_bandmode */
-  155,   /* field[155] = resp_wifi_get_bandwidth */
-  173,   /* field[173] = resp_wifi_get_bandwidths */
-  157,   /* field[157] = resp_wifi_get_channel */
-  142,   /* field[142] = resp_wifi_get_config */
-  159,   /* field[159] = resp_wifi_get_country */
-  166,   /* field[166] = resp_wifi_get_country_code */
-  164,   /* field[164] = resp_wifi_get_inactive_time */
-  153,   /* field[153] = resp_wifi_get_protocol */
-  171,   /* field[171] = resp_wifi_get_protocols */
-  128,   /* field[128] = resp_wifi_get_ps */
-  135,   /* field[135] = resp_wifi_init */
-  148,   /* field[148] = resp_wifi_restore */
-  145,   /* field[145] = resp_wifi_scan_get_ap_num */
-  179,   /* field[179] = resp_wifi_scan_get_ap_record */
-  146,   /* field[146] = resp_wifi_scan_get_ap_records */
-  126,   /* field[126] = resp_wifi_scan_params */
-  143,   /* field[143] = resp_wifi_scan_start */
-  144,   /* field[144] = resp_wifi_scan_stop */
-  174,   /* field[174] = resp_wifi_set_band */
-  176,   /* field[176] = resp_wifi_set_bandmode */
-  154,   /* field[154] = resp_wifi_set_bandwidth */
-  172,   /* field[172] = resp_wifi_set_bandwidths */
-  156,   /* field[156] = resp_wifi_set_channel */
-  141,   /* field[141] = resp_wifi_set_config */
-  158,   /* field[158] = resp_wifi_set_country */
-  165,   /* field[165] = resp_wifi_set_country_code */
-  163,   /* field[163] = resp_wifi_set_inactive_time */
-  209,   /* field[209] = resp_wifi_set_okc_support */
-  152,   /* field[152] = resp_wifi_set_protocol */
-  170,   /* field[170] = resp_wifi_set_protocols */
-  127,   /* field[127] = resp_wifi_set_ps */
-  162,   /* field[162] = resp_wifi_set_storage */
-  190,   /* field[190] = resp_wifi_sta_enterprise_disable */
-  189,   /* field[189] = resp_wifi_sta_enterprise_enable */
-  167,   /* field[167] = resp_wifi_sta_get_aid */
-  151,   /* field[151] = resp_wifi_sta_get_ap_info */
-  168,   /* field[168] = resp_wifi_sta_get_negotiated_phymode */
-  169,   /* field[169] = resp_wifi_sta_get_rssi */
-  186,   /* field[186] = resp_wifi_sta_itwt_get_flow_id_status */
-  187,   /* field[187] = resp_wifi_sta_itwt_send_probe_req */
-  188,   /* field[188] = resp_wifi_sta_itwt_set_target_wake_time_offset */
-  183,   /* field[183] = resp_wifi_sta_itwt_setup */
-  185,   /* field[185] = resp_wifi_sta_itwt_suspend */
-  184,   /* field[184] = resp_wifi_sta_itwt_teardown */
-  182,   /* field[182] = resp_wifi_sta_twt_config */
-  137,   /* field[137] = resp_wifi_start */
-  138,   /* field[138] = resp_wifi_stop */
+  125,   /* field[125] = resp_app_get_desc */
+  135,   /* field[135] = resp_config_heartbeat */
+  218,   /* field[218] = resp_custom_rpc */
+  202,   /* field[202] = resp_eap_clear_ca_cert */
+  204,   /* field[204] = resp_eap_clear_certificate_and_key */
+  194,   /* field[194] = resp_eap_clear_identity */
+  200,   /* field[200] = resp_eap_clear_new_password */
+  198,   /* field[198] = resp_eap_clear_password */
+  196,   /* field[196] = resp_eap_clear_username */
+  205,   /* field[205] = resp_eap_get_disable_time_check */
+  201,   /* field[201] = resp_eap_set_ca_cert */
+  203,   /* field[203] = resp_eap_set_certificate_and_key */
+  213,   /* field[213] = resp_eap_set_disable_time_check */
+  212,   /* field[212] = resp_eap_set_domain_name */
+  214,   /* field[214] = resp_eap_set_eap_methods */
+  209,   /* field[209] = resp_eap_set_fast_params */
+  193,   /* field[193] = resp_eap_set_identity */
+  199,   /* field[199] = resp_eap_set_new_password */
+  208,   /* field[208] = resp_eap_set_pac_file */
+  197,   /* field[197] = resp_eap_set_password */
+  207,   /* field[207] = resp_eap_set_suiteb_certification */
+  206,   /* field[206] = resp_eap_set_ttls_phase2_method */
+  195,   /* field[195] = resp_eap_set_username */
+  210,   /* field[210] = resp_eap_use_default_cert_bundle */
+  226,   /* field[226] = resp_ext_coex */
+  217,   /* field[217] = resp_feature_control */
+  180,   /* field[180] = resp_get_coprocessor_fwversion */
+  183,   /* field[183] = resp_get_dhcp_dns */
+  115,   /* field[115] = resp_get_mac_address */
+  134,   /* field[134] = resp_get_wifi_max_tx_power */
+  117,   /* field[117] = resp_get_wifi_mode */
+  219,   /* field[219] = resp_gpio_config */
+  222,   /* field[222] = resp_gpio_get_level */
+  224,   /* field[224] = resp_gpio_input_enable */
+  220,   /* field[220] = resp_gpio_reset */
+  223,   /* field[223] = resp_gpio_set_direction */
+  221,   /* field[221] = resp_gpio_set_level */
+  225,   /* field[225] = resp_gpio_set_pull_mode */
+  216,   /* field[216] = resp_iface_mac_addr_len_get */
+  215,   /* field[215] = resp_iface_mac_addr_set_get */
+  126,   /* field[126] = resp_mem_monitor */
+  124,   /* field[124] = resp_ota_activate */
+  130,   /* field[130] = resp_ota_begin */
+  132,   /* field[132] = resp_ota_end */
+  131,   /* field[131] = resp_ota_write */
+  182,   /* field[182] = resp_set_dhcp_dns */
+  116,   /* field[116] = resp_set_mac_address */
+  133,   /* field[133] = resp_set_wifi_max_tx_power */
+  118,   /* field[118] = resp_set_wifi_mode */
+  121,   /* field[121] = resp_supp_dpp_bootstrap_gen */
+  120,   /* field[120] = resp_supp_dpp_deinit */
+  119,   /* field[119] = resp_supp_dpp_init */
+  122,   /* field[122] = resp_supp_dpp_start_listen */
+  123,   /* field[123] = resp_supp_dpp_stop_listen */
+  162,   /* field[162] = resp_wifi_ap_get_sta_aid */
+  161,   /* field[161] = resp_wifi_ap_get_sta_list */
+  148,   /* field[148] = resp_wifi_clear_ap_list */
+  150,   /* field[150] = resp_wifi_clear_fast_connect */
+  140,   /* field[140] = resp_wifi_connect */
+  151,   /* field[151] = resp_wifi_deauth_sta */
+  137,   /* field[137] = resp_wifi_deinit */
+  168,   /* field[168] = resp_wifi_disable_pmf_config */
+  141,   /* field[141] = resp_wifi_disconnect */
+  177,   /* field[177] = resp_wifi_get_band */
+  179,   /* field[179] = resp_wifi_get_bandmode */
+  156,   /* field[156] = resp_wifi_get_bandwidth */
+  175,   /* field[175] = resp_wifi_get_bandwidths */
+  158,   /* field[158] = resp_wifi_get_channel */
+  143,   /* field[143] = resp_wifi_get_config */
+  160,   /* field[160] = resp_wifi_get_country */
+  167,   /* field[167] = resp_wifi_get_country_code */
+  165,   /* field[165] = resp_wifi_get_inactive_time */
+  154,   /* field[154] = resp_wifi_get_protocol */
+  173,   /* field[173] = resp_wifi_get_protocols */
+  129,   /* field[129] = resp_wifi_get_ps */
+  136,   /* field[136] = resp_wifi_init */
+  149,   /* field[149] = resp_wifi_restore */
+  146,   /* field[146] = resp_wifi_scan_get_ap_num */
+  181,   /* field[181] = resp_wifi_scan_get_ap_record */
+  147,   /* field[147] = resp_wifi_scan_get_ap_records */
+  127,   /* field[127] = resp_wifi_scan_params */
+  144,   /* field[144] = resp_wifi_scan_start */
+  145,   /* field[145] = resp_wifi_scan_stop */
+  176,   /* field[176] = resp_wifi_set_band */
+  178,   /* field[178] = resp_wifi_set_bandmode */
+  155,   /* field[155] = resp_wifi_set_bandwidth */
+  174,   /* field[174] = resp_wifi_set_bandwidths */
+  157,   /* field[157] = resp_wifi_set_channel */
+  142,   /* field[142] = resp_wifi_set_config */
+  159,   /* field[159] = resp_wifi_set_country */
+  166,   /* field[166] = resp_wifi_set_country_code */
+  164,   /* field[164] = resp_wifi_set_inactive_time */
+  211,   /* field[211] = resp_wifi_set_okc_support */
+  153,   /* field[153] = resp_wifi_set_protocol */
+  172,   /* field[172] = resp_wifi_set_protocols */
+  128,   /* field[128] = resp_wifi_set_ps */
+  163,   /* field[163] = resp_wifi_set_storage */
+  192,   /* field[192] = resp_wifi_sta_enterprise_disable */
+  191,   /* field[191] = resp_wifi_sta_enterprise_enable */
+  169,   /* field[169] = resp_wifi_sta_get_aid */
+  152,   /* field[152] = resp_wifi_sta_get_ap_info */
+  170,   /* field[170] = resp_wifi_sta_get_negotiated_phymode */
+  171,   /* field[171] = resp_wifi_sta_get_rssi */
+  188,   /* field[188] = resp_wifi_sta_itwt_get_flow_id_status */
+  189,   /* field[189] = resp_wifi_sta_itwt_send_probe_req */
+  190,   /* field[190] = resp_wifi_sta_itwt_set_target_wake_time_offset */
+  185,   /* field[185] = resp_wifi_sta_itwt_setup */
+  187,   /* field[187] = resp_wifi_sta_itwt_suspend */
+  186,   /* field[186] = resp_wifi_sta_itwt_teardown */
+  184,   /* field[184] = resp_wifi_sta_twt_config */
+  138,   /* field[138] = resp_wifi_start */
+  139,   /* field[139] = resp_wifi_stop */
   2,   /* field[2] = uid */
 };
 static const ProtobufCIntRange rpc__number_ranges[16 + 1] =
@@ -31858,17 +32063,17 @@ static const ProtobufCIntRange rpc__number_ranges[16 + 1] =
   { 311, 49 },
   { 325, 52 },
   { 334, 54 },
-  { 338, 56 },
-  { 341, 58 },
-  { 513, 114 },
-  { 553, 152 },
-  { 567, 160 },
-  { 581, 163 },
-  { 590, 165 },
-  { 594, 167 },
-  { 597, 169 },
-  { 769, 225 },
-  { 0, 246 }
+  { 337, 56 },
+  { 341, 59 },
+  { 513, 115 },
+  { 553, 153 },
+  { 567, 161 },
+  { 581, 164 },
+  { 590, 166 },
+  { 593, 168 },
+  { 597, 171 },
+  { 769, 227 },
+  { 0, 248 }
 };
 const ProtobufCMessageDescriptor rpc__descriptor =
 {
@@ -31878,7 +32083,7 @@ const ProtobufCMessageDescriptor rpc__descriptor =
   "Rpc",
   "",
   sizeof(Rpc),
-  246,
+  248,
   rpc__field_descriptors,
   rpc__field_indices_by_name,
   16,  rpc__number_ranges,

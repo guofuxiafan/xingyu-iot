@@ -64,6 +64,74 @@ typedef struct {
 
 static uvc_host_driver_t *p_uvc_host_driver = NULL;
 
+static const char *uvc_usb_speed_name(usb_speed_t speed)
+{
+    switch (speed) {
+    case USB_SPEED_LOW:
+        return "low-speed";
+    case USB_SPEED_FULL:
+        return "full-speed";
+    case USB_SPEED_HIGH:
+        return "high-speed";
+    default:
+        return "unknown";
+    }
+}
+
+static void uvc_log_usb_descriptors(uint8_t addr,
+                                    usb_device_handle_t dev_hdl,
+                                    const usb_device_info_t *dev_info,
+                                    const usb_config_desc_t *config_desc)
+{
+    const usb_device_desc_t *device_desc = NULL;
+    esp_err_t ret = usb_host_get_device_descriptor(dev_hdl, &device_desc);
+    if (ret == ESP_OK && device_desc) {
+        ESP_LOGI(TAG,
+                 "USB probe: addr=%u parent_port=%u speed=%s config=%u VID=0x%04x PID=0x%04x device_class=0x%02x",
+                 (unsigned int)addr, (unsigned int)dev_info->parent.port_num,
+                 uvc_usb_speed_name(dev_info->speed), (unsigned int)dev_info->bConfigurationValue,
+                 (unsigned int)device_desc->idVendor, (unsigned int)device_desc->idProduct,
+                 (unsigned int)device_desc->bDeviceClass);
+    } else {
+        ESP_LOGW(TAG, "USB probe: addr=%u failed to read device descriptor: %s",
+                 (unsigned int)addr, esp_err_to_name(ret));
+    }
+
+    if (!config_desc) {
+        ESP_LOGW(TAG, "USB probe: addr=%u has no active configuration descriptor", (unsigned int)addr);
+        return;
+    }
+
+    ESP_LOGI(TAG, "USB config: addr=%u value=%u interfaces=%u total_length=%u",
+             (unsigned int)addr, (unsigned int)config_desc->bConfigurationValue,
+             (unsigned int)config_desc->bNumInterfaces, (unsigned int)config_desc->wTotalLength);
+
+    int offset = 0;
+    const usb_standard_desc_t *desc = (const usb_standard_desc_t *)config_desc;
+    while ((desc = usb_parse_next_descriptor(desc, config_desc->wTotalLength, &offset))) {
+        if (desc->bDescriptorType == USB_B_DESCRIPTOR_TYPE_INTERFACE_ASSOCIATION) {
+            const usb_iad_desc_t *iad = (const usb_iad_desc_t *)desc;
+            ESP_LOGI(TAG,
+                     "USB IAD: first_if=%u if_count=%u function_class=0x%02x subclass=0x%02x protocol=0x%02x",
+                     (unsigned int)iad->bFirstInterface, (unsigned int)iad->bInterfaceCount,
+                     (unsigned int)iad->bFunctionClass, (unsigned int)iad->bFunctionSubClass,
+                     (unsigned int)iad->bFunctionProtocol);
+        } else if (desc->bDescriptorType == USB_B_DESCRIPTOR_TYPE_INTERFACE) {
+            const usb_intf_desc_t *intf = (const usb_intf_desc_t *)desc;
+            ESP_LOGI(TAG,
+                     "USB interface: number=%u alt=%u endpoints=%u class=0x%02x subclass=0x%02x protocol=0x%02x",
+                     (unsigned int)intf->bInterfaceNumber, (unsigned int)intf->bAlternateSetting,
+                     (unsigned int)intf->bNumEndpoints, (unsigned int)intf->bInterfaceClass,
+                     (unsigned int)intf->bInterfaceSubClass, (unsigned int)intf->bInterfaceProtocol);
+        } else if (desc->bDescriptorType == USB_B_DESCRIPTOR_TYPE_ENDPOINT) {
+            const usb_ep_desc_t *ep = (const usb_ep_desc_t *)desc;
+            ESP_LOGI(TAG, "USB endpoint: address=0x%02x attributes=0x%02x max_packet=%u interval=%u",
+                     (unsigned int)ep->bEndpointAddress, (unsigned int)ep->bmAttributes,
+                     (unsigned int)ep->wMaxPacketSize, (unsigned int)ep->bInterval);
+        }
+    }
+}
+
 static esp_err_t uvc_host_interface_check(uint8_t addr, uint8_t parent_port_num, const usb_config_desc_t *config_desc)
 {
     assert(config_desc);
@@ -83,8 +151,13 @@ static esp_err_t uvc_host_interface_check(uint8_t addr, uint8_t parent_port_num,
 
             if (p_uvc_host_driver->user_cb) {
                 size_t frame_info_num = 0;
-                if (uvc_desc_get_frame_list(config_desc, uvc_stream_index, NULL, &frame_info_num) != ESP_OK) {
-                    ESP_LOGE(TAG, "Failed to get frame list for uvc_stream_index %d", uvc_stream_index);
+                esp_err_t frame_list_ret = uvc_desc_get_frame_list(config_desc, uvc_stream_index, NULL, &frame_info_num);
+                ESP_LOGI(TAG, "UVC descriptor probe: addr=%u stream_index=%u result=%s frame_info_num=%u",
+                         (unsigned int)addr, (unsigned int)uvc_stream_index, esp_err_to_name(frame_list_ret),
+                         (unsigned int)frame_info_num);
+                if (frame_list_ret != ESP_OK) {
+                    ESP_LOGE(TAG, "Failed to get frame list for uvc_stream_index %d: %s",
+                             uvc_stream_index, esp_err_to_name(frame_list_ret));
                     return ESP_FAIL;
                 }
 
@@ -123,6 +196,7 @@ static esp_err_t uvc_host_device_connected(uint8_t addr)
             parent_port_num = dev_info.parent.port_num;
         }
         if (usb_host_get_active_config_descriptor(dev_hdl, &config_desc) == ESP_OK) {
+            uvc_log_usb_descriptors(addr, dev_hdl, &dev_info, config_desc);
             is_uvc_device = uvc_desc_is_uvc_device(config_desc);
         }
         ESP_RETURN_ON_ERROR(usb_host_device_close(p_uvc_host_driver->usb_client_hdl, dev_hdl), TAG, "Unable to close USB device");

@@ -548,6 +548,8 @@ static void print_ext_capabilities(uint8_t * ptr)
 
 	ESP_LOGI(TAG, "Extended Features supported: [%" PRIX32 "]", cap);;
 #if H_SPI_HD_HOST_INTERFACE
+	if (cap & ESP_SPI_HD_INTERFACE_SUPPORT_1_DATA_LINE)
+		ESP_LOGI(TAG, "\t * SPI HD 1 data line interface");
 	if (cap & ESP_SPI_HD_INTERFACE_SUPPORT_2_DATA_LINES)
 		ESP_LOGI(TAG, "\t * SPI HD 2 data lines interface");
 	if (cap & ESP_SPI_HD_INTERFACE_SUPPORT_4_DATA_LINES)
@@ -562,7 +564,7 @@ static void print_ext_capabilities(uint8_t * ptr)
 	if (cap & ESP_BT_VHCI_UART_SUPPORT)
 		ESP_LOGI(TAG, "\t * BT over UART (VHCI)");
 #endif
-#if CONFIG_ESP_HOSTED_OT_HOST_ENABLE
+#if H_HOST_OT_ENABLE
 	if (cap & ESP_OT_SUPPORT)
 		ESP_LOGI(TAG, "\t * OpenThread");
 #endif
@@ -910,27 +912,30 @@ static int process_init_event(uint8_t *evt_buf, uint16_t len)
 #if H_SPI_HD_HOST_INTERFACE
 		// reconfigure SPI_HD interface based on host and slave capabilities
 		if (H_SPI_HD_HOST_NUM_DATA_LINES == 4) {
-			// SPI_HD on host is configured to use 4 data bits
 			if (ext_cap & ESP_SPI_HD_INTERFACE_SUPPORT_4_DATA_LINES) {
-				// slave configured to use 4 bits
 				ESP_LOGI(TAG, "configure SPI_HD interface to use 4 data lines");
 				g_h.funcs->_h_spi_hd_set_data_lines(H_SPI_HD_CONFIG_4_DATA_LINES);
+			} else if (ext_cap & ESP_SPI_HD_INTERFACE_SUPPORT_2_DATA_LINES) {
+				ESP_LOGI(TAG, "slave supports 2 data lines, downgrading from 4");
+				g_h.funcs->_h_spi_hd_set_data_lines(H_SPI_HD_CONFIG_2_DATA_LINES);
 			} else {
-				// slave configured to use 2 bits
+				ESP_LOGI(TAG, "slave supports 1 data line, downgrading from 4");
+				g_h.funcs->_h_spi_hd_set_data_lines(H_SPI_HD_CONFIG_1_DATA_LINE);
+			}
+		} else if (H_SPI_HD_HOST_NUM_DATA_LINES == 2) {
+			if (ext_cap & ESP_SPI_HD_INTERFACE_SUPPORT_4_DATA_LINES) {
+				ESP_LOGI(TAG, "slave supports 4 data lines, downgrading to 2");
+				g_h.funcs->_h_spi_hd_set_data_lines(H_SPI_HD_CONFIG_2_DATA_LINES);
+			} else if (ext_cap & ESP_SPI_HD_INTERFACE_SUPPORT_2_DATA_LINES) {
 				ESP_LOGI(TAG, "configure SPI_HD interface to use 2 data lines");
 				g_h.funcs->_h_spi_hd_set_data_lines(H_SPI_HD_CONFIG_2_DATA_LINES);
+			} else {
+				ESP_LOGI(TAG, "slave supports 1 data line, downgrading from 2");
+				g_h.funcs->_h_spi_hd_set_data_lines(H_SPI_HD_CONFIG_1_DATA_LINE);
 			}
 		} else {
-			// SPI_HD on host is configured to use 2 data bits
-			if (ext_cap & ESP_SPI_HD_INTERFACE_SUPPORT_4_DATA_LINES) {
-				// slave configured to use 4 bits
-				ESP_LOGI(TAG, "SPI_HD on slave uses 4 data lines but Host is configure to use 2 data lines");
-				g_h.funcs->_h_spi_hd_set_data_lines(H_SPI_HD_CONFIG_2_DATA_LINES);
-			} else {
-				// slave configured to use 2 bits
-				ESP_LOGI(TAG, "configure SPI_HD interface to use 2 data lines");
-				g_h.funcs->_h_spi_hd_set_data_lines(H_SPI_HD_CONFIG_2_DATA_LINES);
-			}
+			ESP_LOGI(TAG, "configure SPI_HD interface to use 1 data line");
+			g_h.funcs->_h_spi_hd_set_data_lines(H_SPI_HD_CONFIG_1_DATA_LINE);
 		}
 #endif
 	}

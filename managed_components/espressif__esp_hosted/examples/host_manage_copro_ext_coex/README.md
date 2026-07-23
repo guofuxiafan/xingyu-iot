@@ -28,7 +28,17 @@ The arbitration operates over 1, 2, or 3 GPIO lines depending on the chosen mode
 | ESP32-C5 |
 | ESP32-S3 |
 
-> **Note:** ESP32 as a co-processor is not supported. Bluetooth on the co-processor is not supported.
+> **Note:** ESP32 as a co-processor is not supported.
+>
+> **Bluetooth + EXT_COEX:** On chips with advanced coexistence hardware
+> (`SOC_EXTERNAL_COEX_ADVANCE` — **ESP32-C2 / C5 / C6 / C61 / H2 / H4 / H21**), external
+> coexistence works **alongside** Bluetooth/BLE — both can stay enabled. On other chips
+> (e.g. **ESP32-S3**), the BT controller must be disabled when EXT_COEX is enabled.
+>
+> ⚠️ **ESP-IDF version:** EXT_COEX with **Bluetooth disabled** is supported across all
+> ESP-IDF tags. EXT_COEX **with Bluetooth enabled** currently requires **ESP-IDF `master`** —
+> as of Jun-26 the stable/released tags do not yet include this support, so test on the
+> latest `master`.
 
 ## 2 Setup
 
@@ -37,6 +47,18 @@ EXT_COEX requires configuration on both the **slave** and the **host** before us
 ### 2.1 Slave Setup
 
 Run `idf.py menuconfig` on the slave and apply the following:
+
+**Advanced-coex chips (ESP32-C6 / C61 / C5)** — Bluetooth/BLE may stay enabled:
+
+```
+    ├── Component config → Bluetooth
+    │    └── [*] Bluetooth                                   <---- Keep enabled if BLE needed ✔
+    └── Example Configuration
+         ├── [*] Enable BT sharing via hosted                <---- Keep enabled if BLE needed ✔
+         └── [*] External Coexistence support                <---- Enable  ✔
+```
+
+**Other chips (e.g. ESP32-S3)** — Bluetooth must be disabled:
 
 ```
     ├── Component config → Bluetooth

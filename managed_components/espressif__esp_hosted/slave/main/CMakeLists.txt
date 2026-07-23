@@ -106,3 +106,10 @@ target_include_directories(${COMPONENT_LIB} PRIVATE "${protocomm_dir}/src/common
 
 # Add linker options to wrap esp_wifi_init function
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_wifi_init")
+
+if(DEFINED ENV{ESP_HOSTED_CI_PEDANTIC})
+	target_compile_options(${COMPONENT_LIB} PRIVATE
+		-Werror -Werror=deprecated-declarations -Werror=unused-variable
+		-Werror=unused-but-set-variable -Werror=unused-function
+		$<$<COMPILE_LANGUAGE:C>:-Wstrict-prototypes>)
+endif()

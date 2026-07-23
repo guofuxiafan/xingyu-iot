@@ -91,6 +91,7 @@ esp_err_t req_wifi_get_band_mode(Rpc *req, Rpc *resp, void *priv_data);
 
 esp_err_t req_wifi_set_inactive_time(Rpc *req, Rpc *resp, void *priv_data);
 esp_err_t req_wifi_get_inactive_time(Rpc *req, Rpc *resp, void *priv_data);
+esp_err_t req_wifi_disable_pmf_config(Rpc *req, Rpc *resp, void *priv_data);
 esp_err_t req_wifi_scan_params(Rpc *req, Rpc *resp, void *priv_data);
 
 #if CONFIG_SOC_WIFI_HE_SUPPORT

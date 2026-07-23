@@ -7,7 +7,7 @@ menu "Wi-Fi Remote"
         default n if ESP_HOST_WIFI_ENABLED
 
     if ESP_WIFI_REMOTE_ENABLED
-        orsource "./Kconfig.idf_v$IDF_VERSION.in"
+        orsource "./Kconfig.idf_v$ESP_IDF_VERSION.in"
         orsource "./Kconfig.rpc.in"
 
         config ESP_WIFI_REMOTE_EAP_ENABLED # ignore: multiple-definition

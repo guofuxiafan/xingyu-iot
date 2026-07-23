@@ -11,11 +11,11 @@ from pathlib import Path
 import websockets
 
 WS_PORT = 8765
-HTTP_PORT = 8080
+HTTP_PORT = 8081
 MAX_FRAMES = 600
 
 # Fixed routing:
-# cam0 = CSI, cam1 = HOST2 USB, cam2 = HOST3 USB.
+# cam0 = CSI, cam1 = USB (direct Type-A1 or HUB), cam2 = second HUB USB.
 FRAMES_DIRS = {
     0: Path(r"D:\WHR\program\iot\camera\imagebase\ws_frames_m"),
     1: Path(r"D:\WHR\program\iot\camera\imagebase\ws_frames_l"),
@@ -49,8 +49,31 @@ def parse_frame(data: bytes) -> tuple[int, int, bytes]:
         raise ValueError(f"Frame truncated: expected {data_len} bytes, got {len(data) - 13}")
 
     jpeg_data = data[13:13 + data_len]
-    if len(jpeg_data) < 16 or jpeg_data[:2] != b"\xff\xd8" or jpeg_data[-2:] != b"\xff\xd9":
-        raise ValueError(f"Invalid JPEG payload: cam{camera_id}, size={len(jpeg_data)}")
+    if len(jpeg_data) < 16:
+        raise ValueError(f"JPEG payload too short: cam{camera_id}, size={len(jpeg_data)}")
+
+    # Some DMA/encoder paths can leave padding around an otherwise complete
+    # JPEG. Normalize to the first SOI...EOI image so only decodable bytes are
+    # published and written to disk.
+    if jpeg_data[:2] != b"\xff\xd8" or jpeg_data[-2:] != b"\xff\xd9":
+        soi = jpeg_data.find(b"\xff\xd8")
+        eoi = jpeg_data.find(b"\xff\xd9", soi + 2) if soi >= 0 else -1
+        if soi < 0 or eoi < 0:
+            head = jpeg_data[:4].hex(" ")
+            tail = jpeg_data[-4:].hex(" ")
+            raise ValueError(
+                f"Invalid JPEG payload: cam{camera_id}, size={len(jpeg_data)}, "
+                f"head={head}, tail={tail}"
+            )
+
+        normalized_len = eoi + 2 - soi
+        print(
+            f"[WS] cam{camera_id} normalized JPEG: "
+            f"payload={len(jpeg_data)}, jpeg={normalized_len}, prefix={soi}, "
+            f"suffix={len(jpeg_data) - (eoi + 2)}"
+        )
+        jpeg_data = jpeg_data[soi:eoi + 2]
+
     return timestamp_ms, camera_id, jpeg_data
 
 
@@ -183,7 +206,7 @@ def render_index() -> bytes:
         "<h1>ESP32-P4 Camera Preview</h1>\n"
         '<div class="cameras">\n'
         '  <div class="camera-card"><h2>CSI (cam0)</h2><img src="/stream_m" alt="cam0"></div>\n'
-        '  <div class="camera-card"><h2>HOST2 (cam1)</h2><img src="/stream_l" alt="cam1"></div>\n'
+        '  <div class="camera-card"><h2>USB (cam1)</h2><img src="/stream_l" alt="cam1"></div>\n'
         '  <div class="camera-card"><h2>HOST3 (cam2)</h2><img src="/stream_r" alt="cam2"></div>\n'
         "</div>\n"
         "</body>\n"
@@ -249,7 +272,7 @@ async def main():
     await websockets.serve(websocket_handler, "0.0.0.0", WS_PORT)
     print(f"[WS] WebSocket server running on ws://0.0.0.0:{WS_PORT}")
     print(f"[WS] cam0(CSI)   -> {FRAMES_DIRS[0]}")
-    print(f"[WS] cam1(HOST2) -> {FRAMES_DIRS[1]}")
+    print(f"[WS] cam1(USB) -> {FRAMES_DIRS[1]}")
     print(f"[WS] cam2(HOST3) -> {FRAMES_DIRS[2]}")
     print("[WS] Waiting for ESP32-P4 connection...")
 

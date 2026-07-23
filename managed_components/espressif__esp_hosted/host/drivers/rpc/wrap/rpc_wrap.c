@@ -24,7 +24,7 @@
 #include "esp_dpp.h"
 #endif
 
-#if H_OT_HOST_ENABLE
+#if H_HOST_OT_ENABLE
 #include "esp_hosted_openthread.h"
 #endif
 
@@ -687,6 +687,7 @@ int rpc_rsp_callback(ctrl_cmd_t * app_resp)
 	case RPC_ID__Resp_SetDhcpDnsStatus:
 	case RPC_ID__Resp_WifiSetInactiveTime:
 	case RPC_ID__Resp_WifiGetInactiveTime:
+	case RPC_ID__Resp_WifiDisablePmfConfig:
 	case RPC_ID__Resp_IfaceMacAddrSetGet:
 	case RPC_ID__Resp_IfaceMacAddrLenGet:
 	case RPC_ID__Resp_FeatureControl:
@@ -1073,6 +1074,18 @@ esp_err_t rpc_wifi_get_inactive_time(wifi_interface_t ifx, uint16_t *sec)
 	if (resp && resp->resp_event_status == SUCCESS) {
 		*sec = resp->u.wifi_inactive_time.sec;
 	}
+	return rpc_rsp_callback(resp);
+}
+
+esp_err_t rpc_wifi_disable_pmf_config(wifi_interface_t ifx)
+{
+	/* implemented synchronous */
+	ctrl_cmd_t *req = RPC_DEFAULT_REQ();
+	ctrl_cmd_t *resp = NULL;
+
+	req->u.wifi_disable_pmf_config.ifx = ifx;
+	resp = rpc_slaveif_wifi_disable_pmf_config(req);
+
 	return rpc_rsp_callback(resp);
 }
 
@@ -2844,7 +2857,7 @@ esp_err_t esp_hosted_cp_ext_coex_disable(void)
 
 #endif
 
-#if H_OT_HOST_ENABLE
+#if H_HOST_OT_ENABLE
 esp_err_t rpc_iface_openthread_rcp_init(void)
 {
 	rcp_feature_control_t feature_control;
@@ -2915,4 +2928,4 @@ esp_err_t rpc_iface_openthread_rcp_query(esp_hosted_openthread_query_t query)
 
 	return rpc_iface_feature_control(&feature_control);
 }
-#endif // H_OT_HOST_ENABLE
+#endif // H_HOST_OT_ENABLE

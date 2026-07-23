@@ -34,7 +34,7 @@ extern "C" {
 #if H_EXT_COEX_SUPPORT
 #include "esp_hosted_cp_ext_coex.h"
 #endif
-#if H_OT_HOST_ENABLE
+#if H_HOST_OT_ENABLE
 #include "esp_hosted_openthread.h"
 #endif
 /** Exported variables **/
@@ -96,6 +96,7 @@ esp_err_t rpc_wifi_sta_get_negotiated_phymode(wifi_phy_mode_t *phymode);
 esp_err_t rpc_wifi_sta_get_aid(uint16_t *aid);
 esp_err_t rpc_wifi_set_inactive_time(wifi_interface_t ifx, uint16_t sec);
 esp_err_t rpc_wifi_get_inactive_time(wifi_interface_t ifx, uint16_t *sec);
+esp_err_t rpc_wifi_disable_pmf_config(wifi_interface_t ifx);
 esp_err_t rpc_get_coprocessor_fwversion(esp_hosted_coprocessor_fwver_t *ver_info);
 esp_err_t rpc_get_cp_info(uint32_t *cp_chip_id, char *cp_target_name, size_t cp_target_name_len);
 
@@ -114,7 +115,7 @@ esp_err_t rpc_iface_configure_heartbeat(bool enable, int duration_sec);
 esp_err_t rpc_iface_set_mem_monitor(esp_hosted_config_mem_monitor_t *config, esp_hosted_curr_mem_info_t *curr_mem_info);
 #endif
 
-#if H_OT_HOST_ENABLE
+#if H_HOST_OT_ENABLE
 esp_err_t rpc_iface_openthread_rcp_init(void);
 esp_err_t rpc_iface_openthread_rcp_deinit(void);
 esp_err_t rpc_iface_openthread_rcp_start(void);

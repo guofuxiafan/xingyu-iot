@@ -1916,6 +1916,22 @@ esp_err_t req_wifi_get_inactive_time(Rpc *req, Rpc *resp, void *priv_data)
 	return ESP_OK;
 }
 
+esp_err_t req_wifi_disable_pmf_config(Rpc *req, Rpc *resp, void *priv_data)
+{
+	RPC_TEMPLATE(RpcRespWifiDisablePmfConfig, resp_wifi_disable_pmf_config,
+			RpcReqWifiDisablePmfConfig, req_wifi_disable_pmf_config,
+			rpc__resp__wifi_disable_pmf_config__init);
+
+	wifi_interface_t ifx = req_payload->ifx;
+
+	RPC_RET_FAIL_IF(esp_wifi_disable_pmf_config(ifx));
+
+	/* Echo back the interface PMF was disabled for (future async-response readiness) */
+	resp_payload->ifx = ifx;
+
+	return ESP_OK;
+}
+
 /* Function gets/sets scan parameters */
 esp_err_t req_wifi_scan_params(Rpc *req,
 		Rpc *resp, void *priv_data)

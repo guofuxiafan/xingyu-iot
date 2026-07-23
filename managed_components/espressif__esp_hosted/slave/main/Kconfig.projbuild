@@ -50,6 +50,10 @@ menu "Example Configuration"
 			bool "ESP32-P4-Function-EV-Board"
 			depends on IDF_TARGET_ESP32C6
 
+		config ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
+			bool "ESP32-P4X-C5-Function-EV-Board"
+			depends on IDF_TARGET_ESP32C5
+
 		config C2_C5_MODULE_SUB_BOARD
 			bool "ESP32-P4 EV Sub-Board for C2 & C5"
 			depends on IDF_TARGET_ESP32C2 || IDF_TARGET_ESP32C5
@@ -168,6 +172,7 @@ menu "Example Configuration"
 					default 20 if ESP_HOST_DEV_BOARD_P4_C6_CORE
 					default 20 if ESP32P4_EYE_C6_BOARD
 					default 27 if ESP_HOST_DEV_BOARD_P4_C61_CORE
+					default 8 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 					default 13 if IDF_TARGET_ESP32
 					default 11 if IDF_TARGET_ESP32S2 || IDF_TARGET_ESP32S3
 					default 5 if IDF_TARGET_ESP32H2
@@ -183,6 +188,7 @@ menu "Example Configuration"
 					default 21 if ESP_HOST_DEV_BOARD_P4_C6_CORE
 					default 21 if ESP32P4_EYE_C6_BOARD
 					default 28 if ESP_HOST_DEV_BOARD_P4_C61_CORE
+					default 7 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 					default 12 if IDF_TARGET_ESP32
 					default 13 if IDF_TARGET_ESP32S2 || IDF_TARGET_ESP32S3
 					default 0 if IDF_TARGET_ESP32H2
@@ -198,6 +204,7 @@ menu "Example Configuration"
 					default 19 if ESP_HOST_DEV_BOARD_P4_C6_CORE
 					default 19 if ESP32P4_EYE_C6_BOARD
 					default 26 if ESP_HOST_DEV_BOARD_P4_C61_CORE
+					default 9 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 					default 3 if IDF_TARGET_ESP32C5
 					default 0 if IDF_TARGET_ESP32C2 && C2_C5_MODULE_SUB_BOARD
 					default 14 if IDF_TARGET_ESP32
@@ -215,6 +222,7 @@ menu "Example Configuration"
 					default 18 if ESP_HOST_DEV_BOARD_P4_C6_CORE
 					default 18 if ESP32P4_EYE_C6_BOARD
 					default 25 if ESP_HOST_DEV_BOARD_P4_C61_CORE
+					default 10 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 					default 15 if IDF_TARGET_ESP32
 					default 10 if IDF_TARGET_ESP32S2 || IDF_TARGET_ESP32S3
 					default 8 if IDF_TARGET_ESP32C61
@@ -278,6 +286,7 @@ menu "Example Configuration"
 					default 22 if ESP_HOST_DEV_BOARD_P4_C6_CORE
 					default 22 if ESP32P4_EYE_C6_BOARD
 					default 22 if ESP_HOST_DEV_BOARD_P4_C61_CORE
+					default 14 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 					default 4 if IDF_TARGET_ESP32C2 && C2_C5_MODULE_SUB_BOARD
 					default 3 if IDF_TARGET_ESP32C2 && !C2_C5_MODULE_SUB_BOARD
 					default 4 if IDF_TARGET_ESP32C5 && C2_C5_MODULE_SUB_BOARD
@@ -297,6 +306,7 @@ menu "Example Configuration"
 					default 23 if ESP_HOST_DEV_BOARD_P4_C6_CORE
 					default 23 if ESP32P4_EYE_C6_BOARD
 					default 23 if ESP_HOST_DEV_BOARD_P4_C61_CORE
+					default 13 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 					default 1 if IDF_TARGET_ESP32C2 && C2_C5_MODULE_SUB_BOARD
 					default 4 if IDF_TARGET_ESP32C2 && !C2_C5_MODULE_SUB_BOARD
 					default 0 if IDF_TARGET_ESP32C5 && C2_C5_MODULE_SUB_BOARD
@@ -524,12 +534,21 @@ menu "Example Configuration"
 
 				config ESP_SPI_HD_PRIV_INTERFACE_2_DATA_LINES
 					bool "2 data lines"
+
+				config ESP_SPI_HD_PRIV_INTERFACE_1_DATA_LINE
+					depends on $(ESP_IDF_VERSION) >= "6.1"
+					bool "1 data line"
 			endchoice
+
+			### SPI-HD 1-bit mode not compatible with 2/4-bit modes
+			comment "Make sure host is also configured for 1 data line or SPI-HD transport will not work"
+				depends on ESP_SPI_HD_PRIV_INTERFACE_1_DATA_LINE
 
 			config ESP_SPI_HD_INTERFACE_NUM_DATA_LINES
 				int
 				default 4 if ESP_SPI_HD_PRIV_INTERFACE_4_DATA_LINES
 				default 2 if ESP_SPI_HD_PRIV_INTERFACE_2_DATA_LINES
+				default 1 if ESP_SPI_HD_PRIV_INTERFACE_1_DATA_LINE
 
 			menu "GPIOs"
 
@@ -540,6 +559,7 @@ menu "Example Configuration"
 					default 18 if ESP_HOST_DEV_BOARD_P4_C6_CORE
 					default 18 if ESP32P4_EYE_C6_BOARD
 					default 25 if ESP_HOST_DEV_BOARD_P4_C61_CORE
+					default 10 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 					default 8 if IDF_TARGET_ESP32C61
 					default 10
 					help
@@ -552,6 +572,7 @@ menu "Example Configuration"
 					default 19 if ESP_HOST_DEV_BOARD_P4_C6_CORE
 					default 19 if ESP32P4_EYE_C6_BOARD
 					default 26 if ESP_HOST_DEV_BOARD_P4_C61_CORE
+					default 9 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 					default 3 if IDF_TARGET_ESP32C5
 					default 0 if IDF_TARGET_ESP32C2
 					default 6
@@ -565,17 +586,20 @@ menu "Example Configuration"
 					default 20 if ESP_HOST_DEV_BOARD_P4_C6_CORE
 					default 20 if ESP32P4_EYE_C6_BOARD
 					default 27 if ESP_HOST_DEV_BOARD_P4_C61_CORE
+					default 8 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 					default 7
 					help
 						SPI HD controller Host D0
 
 				config ESP_SPI_HD_GPIO_D1
+					depends on !ESP_SPI_HD_PRIV_INTERFACE_1_DATA_LINE
 					int "Slave GPIO pin for Host D1"
 					default 21 if ESP_HOST_DEV_BOARD_P4_FUNC_BOARD
 					default 7 if ESP_HOST_DEV_BOARD_P4_C5_CORE
 					default 21 if ESP_HOST_DEV_BOARD_P4_C6_CORE
 					default 21 if ESP32P4_EYE_C6_BOARD
 					default 28 if ESP_HOST_DEV_BOARD_P4_C61_CORE
+					default 7 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 					default 2
 					help
 						SPI HD controller Host D1
@@ -588,6 +612,7 @@ menu "Example Configuration"
 					default 22 if ESP_HOST_DEV_BOARD_P4_C6_CORE
 					default 22 if ESP32P4_EYE_C6_BOARD
 					default 22 if ESP_HOST_DEV_BOARD_P4_C61_CORE
+					default 14 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 					default 4 if IDF_TARGET_ESP32C61
 					default 5
 					help
@@ -601,18 +626,29 @@ menu "Example Configuration"
 					default 23 if ESP_HOST_DEV_BOARD_P4_C6_CORE
 					default 23 if ESP32P4_EYE_C6_BOARD
 					default 23 if ESP_HOST_DEV_BOARD_P4_C61_CORE
+					default 13 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 					default 3 if IDF_TARGET_ESP32C61
 					default 4
 					help
 						SPI HD controller Host D3
 
+			config ESP_SPI_HD_DATA_READY_ENABLED
+				bool "Use DATA_READY GPIO"
+				default y
+				help
+					Enable to use a dedicated GPIO for signaling host that slave has
+					data to be read. Disable to save one GPIO pin — host will poll the
+					TX_BUF_LEN register instead (adds ~1-5 ms latency).
+
 				config ESP_SPI_HD_GPIO_DATA_READY
+					depends on ESP_SPI_HD_DATA_READY_ENABLED
 					int "Slave GPIO pin for Data Ready"
 					default 2 if ESP_HOST_DEV_BOARD_P4_FUNC_BOARD
 					default 28 if ESP_HOST_DEV_BOARD_P4_C5_CORE
 					default 9 if ESP_HOST_DEV_BOARD_P4_C6_CORE
 					default 9 if ESP_HOST_DEV_BOARD_P4_C61_CORE
 					default 9 if ESP32P4_EYE_C6_BOARD
+					default 2 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 					default 0 if IDF_TARGET_ESP32C5
 					default 1 if IDF_TARGET_ESP32C2
 					default 23 if IDF_TARGET_ESP32C61
@@ -621,6 +657,7 @@ menu "Example Configuration"
 						Slave GPIO pin for indicating host that SPI slave has data to be read by host
 
 				choice ESP_SPI_HD_DATAREADY_GPIO_CONFIG
+					depends on ESP_SPI_HD_DATA_READY_ENABLED
 					bool "DataReady GPIO Config"
 					default ESP_DR_ACTIVE_HIGH
 					help
@@ -673,6 +710,7 @@ menu "Example Configuration"
 
 			config ESP_UART_PIN_TX
 				int "TX GPIO number"
+				default 7 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 				default 13 if IDF_TARGET_ESP32
 				default 5 if IDF_TARGET_ESP32C2 || IDF_TARGET_ESP32C3
 				default 14 if IDF_TARGET_ESP32C5
@@ -689,6 +727,7 @@ menu "Example Configuration"
 
 			config ESP_UART_PIN_RX
 				int "RX GPIO number"
+				default 8 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD
 				default 12 if IDF_TARGET_ESP32
 				default 4 if IDF_TARGET_ESP32C2 || IDF_TARGET_ESP32C3
 				default 13 if IDF_TARGET_ESP32C5
@@ -1029,7 +1068,7 @@ menu "Example Configuration"
 
 	if ESP_HOSTED_OT_RCP_ENABLED
 
-	   rsource ./Kconfig.openthread
+	   rsource "./Kconfig.openthread"
 
 	endif
 
@@ -1291,6 +1330,8 @@ menu "Example Configuration"
 				int
 				default 2 if ESP_HOST_DEV_BOARD_P4_FUNC_BOARD && !ESP_SPI_HD_HOST_INTERFACE
 				default 9 if ESP_HOST_DEV_BOARD_P4_FUNC_BOARD && ESP_SPI_HD_HOST_INTERFACE
+				default 2 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD && !ESP_SPI_HD_HOST_INTERFACE
+				default 28 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD && ESP_SPI_HD_HOST_INTERFACE
 				default 3 if ESP_HOST_DEV_BOARD_P4_C5_CORE
 				default 6 if C2_C5_MODULE_SUB_BOARD && IDF_TARGET_ESP32C2
 				default -1
@@ -1299,6 +1340,8 @@ menu "Example Configuration"
 				int
 				default 2 if ESP_HOST_DEV_BOARD_P4_FUNC_BOARD && !ESP_SPI_HD_HOST_INTERFACE
 				default 9 if ESP_HOST_DEV_BOARD_P4_FUNC_BOARD && ESP_SPI_HD_HOST_INTERFACE
+				default 2 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD && !ESP_SPI_HD_HOST_INTERFACE
+				default 28 if ESP_HOST_DEV_BOARD_P4X_C5_FUNC_BOARD && ESP_SPI_HD_HOST_INTERFACE
 				default 3 if ESP_HOST_DEV_BOARD_P4_C5_CORE
 				default 6 if C2_C5_MODULE_SUB_BOARD && IDF_TARGET_ESP32C2
 				default 100

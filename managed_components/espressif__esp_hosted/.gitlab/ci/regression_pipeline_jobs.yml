@@ -5,6 +5,8 @@
 # - fix only merged for v5.3.2 and above
 # - https://github.com/espressif/esp-idf/commit/1aec9e7df38bb7ccc9ec2fb846288910c329d77a
 
+### IDF master and v6.x don't build mqtt example with wifi-remote and ESP-Hosted
+### so we only verify mqtt example against earlier IDF
 regression_build_idf_v5.3_mqtt_h2:
   variables:
     EXAMPLE_CI_FILE: "sdkconfig.ci.p4_wifi"
@@ -63,20 +65,6 @@ regression_build_idf_v5.5_iperf:
         IDF_TARGET: ["esp32p4", "esp32h2"]
         IDF_SLAVE_TARGET: ["esp32", "esp32c2", "esp32c3", "esp32s3" ]
         IDF_EXAMPLE_PATH: ["examples/wifi/iperf"]
-
-regression_build_idf_master_mqtt:
-  variables:
-    EXAMPLE_CI_FILE: "sdkconfig.ci.p4_wifi"
-  tags:
-    - build
-  rules:
-    - !reference [.staging_branch_rules, rules]
-  extends: .build_template_example_mqtt
-  image: espressif/idf:latest
-  parallel:
-    matrix:
-      - IDF_TARGET: ["esp32p4", "esp32h2"]
-        IDF_SLAVE_TARGET: ["esp32", "esp32c2", "esp32c3", "esp32s3" ]
 
 regression_build_idf_master_iperf:
   tags:

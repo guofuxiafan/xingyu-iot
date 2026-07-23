@@ -186,6 +186,8 @@ typedef struct RpcReqWifiSetInactiveTime RpcReqWifiSetInactiveTime;
 typedef struct RpcRespWifiSetInactiveTime RpcRespWifiSetInactiveTime;
 typedef struct RpcReqWifiGetInactiveTime RpcReqWifiGetInactiveTime;
 typedef struct RpcRespWifiGetInactiveTime RpcRespWifiGetInactiveTime;
+typedef struct RpcReqWifiDisablePmfConfig RpcReqWifiDisablePmfConfig;
+typedef struct RpcRespWifiDisablePmfConfig RpcRespWifiDisablePmfConfig;
 typedef struct RpcReqWifiStaItwtSetup RpcReqWifiStaItwtSetup;
 typedef struct RpcRespWifiStaItwtSetup RpcRespWifiStaItwtSetup;
 typedef struct RpcReqWifiStaItwtTeardown RpcReqWifiStaItwtTeardown;
@@ -4029,6 +4031,27 @@ struct  RpcRespWifiGetInactiveTime
     , 0, 0 }
 
 
+struct  RpcReqWifiDisablePmfConfig
+{
+  ProtobufCMessage base;
+  uint32_t ifx;
+};
+#define RPC__REQ__WIFI_DISABLE_PMF_CONFIG__INIT \
+ { PROTOBUF_C_MESSAGE_INIT (&rpc__req__wifi_disable_pmf_config__descriptor) \
+    , 0 }
+
+
+struct  RpcRespWifiDisablePmfConfig
+{
+  ProtobufCMessage base;
+  int32_t resp;
+  uint32_t ifx;
+};
+#define RPC__RESP__WIFI_DISABLE_PMF_CONFIG__INIT \
+ { PROTOBUF_C_MESSAGE_INIT (&rpc__resp__wifi_disable_pmf_config__descriptor) \
+    , 0, 0 }
+
+
 struct  RpcReqWifiStaItwtSetup
 {
   ProtobufCMessage base;
@@ -5573,6 +5596,7 @@ typedef enum {
   RPC__PAYLOAD_REQ_WIFI_GET_INACTIVE_TIME = 326,
   RPC__PAYLOAD_REQ_WIFI_SET_COUNTRY_CODE = 334,
   RPC__PAYLOAD_REQ_WIFI_GET_COUNTRY_CODE = 335,
+  RPC__PAYLOAD_REQ_WIFI_DISABLE_PMF_CONFIG = 337,
   RPC__PAYLOAD_REQ_WIFI_STA_GET_AID = 338,
   RPC__PAYLOAD_REQ_WIFI_STA_GET_NEGOTIATED_PHYMODE = 339,
   RPC__PAYLOAD_REQ_WIFI_STA_GET_RSSI = 341,
@@ -5684,6 +5708,7 @@ typedef enum {
   RPC__PAYLOAD_RESP_WIFI_GET_INACTIVE_TIME = 582,
   RPC__PAYLOAD_RESP_WIFI_SET_COUNTRY_CODE = 590,
   RPC__PAYLOAD_RESP_WIFI_GET_COUNTRY_CODE = 591,
+  RPC__PAYLOAD_RESP_WIFI_DISABLE_PMF_CONFIG = 593,
   RPC__PAYLOAD_RESP_WIFI_STA_GET_AID = 594,
   RPC__PAYLOAD_RESP_WIFI_STA_GET_NEGOTIATED_PHYMODE = 595,
   RPC__PAYLOAD_RESP_WIFI_STA_GET_RSSI = 597,
@@ -5839,6 +5864,7 @@ struct  Rpc
     RpcReqWifiGetInactiveTime *req_wifi_get_inactive_time;
     RpcReqWifiSetCountryCode *req_wifi_set_country_code;
     RpcReqWifiGetCountryCode *req_wifi_get_country_code;
+    RpcReqWifiDisablePmfConfig *req_wifi_disable_pmf_config;
     RpcReqWifiStaGetAid *req_wifi_sta_get_aid;
     RpcReqWifiStaGetNegotiatedPhymode *req_wifi_sta_get_negotiated_phymode;
     RpcReqWifiStaGetRssi *req_wifi_sta_get_rssi;
@@ -5953,6 +5979,7 @@ struct  Rpc
     RpcRespWifiGetInactiveTime *resp_wifi_get_inactive_time;
     RpcRespWifiSetCountryCode *resp_wifi_set_country_code;
     RpcRespWifiGetCountryCode *resp_wifi_get_country_code;
+    RpcRespWifiDisablePmfConfig *resp_wifi_disable_pmf_config;
     RpcRespWifiStaGetAid *resp_wifi_sta_get_aid;
     RpcRespWifiStaGetNegotiatedPhymode *resp_wifi_sta_get_negotiated_phymode;
     RpcRespWifiStaGetRssi *resp_wifi_sta_get_rssi;
@@ -9291,6 +9318,44 @@ RpcRespWifiGetInactiveTime *
 void   rpc__resp__wifi_get_inactive_time__free_unpacked
                      (RpcRespWifiGetInactiveTime *message,
                       ProtobufCAllocator *allocator);
+/* RpcReqWifiDisablePmfConfig methods */
+void   rpc__req__wifi_disable_pmf_config__init
+                     (RpcReqWifiDisablePmfConfig         *message);
+size_t rpc__req__wifi_disable_pmf_config__get_packed_size
+                     (const RpcReqWifiDisablePmfConfig   *message);
+size_t rpc__req__wifi_disable_pmf_config__pack
+                     (const RpcReqWifiDisablePmfConfig   *message,
+                      uint8_t             *out);
+size_t rpc__req__wifi_disable_pmf_config__pack_to_buffer
+                     (const RpcReqWifiDisablePmfConfig   *message,
+                      ProtobufCBuffer     *buffer);
+RpcReqWifiDisablePmfConfig *
+       rpc__req__wifi_disable_pmf_config__unpack
+                     (ProtobufCAllocator  *allocator,
+                      size_t               len,
+                      const uint8_t       *data);
+void   rpc__req__wifi_disable_pmf_config__free_unpacked
+                     (RpcReqWifiDisablePmfConfig *message,
+                      ProtobufCAllocator *allocator);
+/* RpcRespWifiDisablePmfConfig methods */
+void   rpc__resp__wifi_disable_pmf_config__init
+                     (RpcRespWifiDisablePmfConfig         *message);
+size_t rpc__resp__wifi_disable_pmf_config__get_packed_size
+                     (const RpcRespWifiDisablePmfConfig   *message);
+size_t rpc__resp__wifi_disable_pmf_config__pack
+                     (const RpcRespWifiDisablePmfConfig   *message,
+                      uint8_t             *out);
+size_t rpc__resp__wifi_disable_pmf_config__pack_to_buffer
+                     (const RpcRespWifiDisablePmfConfig   *message,
+                      ProtobufCBuffer     *buffer);
+RpcRespWifiDisablePmfConfig *
+       rpc__resp__wifi_disable_pmf_config__unpack
+                     (ProtobufCAllocator  *allocator,
+                      size_t               len,
+                      const uint8_t       *data);
+void   rpc__resp__wifi_disable_pmf_config__free_unpacked
+                     (RpcRespWifiDisablePmfConfig *message,
+                      ProtobufCAllocator *allocator);
 /* RpcReqWifiStaItwtSetup methods */
 void   rpc__req__wifi_sta_itwt_setup__init
                      (RpcReqWifiStaItwtSetup         *message);
@@ -12219,6 +12284,12 @@ typedef void (*RpcReqWifiGetInactiveTime_Closure)
 typedef void (*RpcRespWifiGetInactiveTime_Closure)
                  (const RpcRespWifiGetInactiveTime *message,
                   void *closure_data);
+typedef void (*RpcReqWifiDisablePmfConfig_Closure)
+                 (const RpcReqWifiDisablePmfConfig *message,
+                  void *closure_data);
+typedef void (*RpcRespWifiDisablePmfConfig_Closure)
+                 (const RpcRespWifiDisablePmfConfig *message,
+                  void *closure_data);
 typedef void (*RpcReqWifiStaItwtSetup_Closure)
                  (const RpcReqWifiStaItwtSetup *message,
                   void *closure_data);
@@ -12791,6 +12862,8 @@ extern const ProtobufCMessageDescriptor rpc__req__wifi_set_inactive_time__descri
 extern const ProtobufCMessageDescriptor rpc__resp__wifi_set_inactive_time__descriptor;
 extern const ProtobufCMessageDescriptor rpc__req__wifi_get_inactive_time__descriptor;
 extern const ProtobufCMessageDescriptor rpc__resp__wifi_get_inactive_time__descriptor;
+extern const ProtobufCMessageDescriptor rpc__req__wifi_disable_pmf_config__descriptor;
+extern const ProtobufCMessageDescriptor rpc__resp__wifi_disable_pmf_config__descriptor;
 extern const ProtobufCMessageDescriptor rpc__req__wifi_sta_itwt_setup__descriptor;
 extern const ProtobufCMessageDescriptor rpc__resp__wifi_sta_itwt_setup__descriptor;
 extern const ProtobufCMessageDescriptor rpc__req__wifi_sta_itwt_teardown__descriptor;

@@ -525,6 +525,11 @@ int compose_rpc_req(Rpc *req, ctrl_cmd_t *app_req, int32_t *failure_status)
 				rpc__req__wifi_get_inactive_time__init);
 		req_payload->ifx = app_req->u.wifi_inactive_time.ifx;
 		break;
+	} case RPC_ID__Req_WifiDisablePmfConfig: {
+		RPC_ALLOC_ASSIGN(RpcReqWifiDisablePmfConfig, req_wifi_disable_pmf_config,
+				rpc__req__wifi_disable_pmf_config__init);
+		req_payload->ifx = app_req->u.wifi_disable_pmf_config.ifx;
+		break;
 #if H_WIFI_HE_SUPPORT
 	} case RPC_ID__Req_WifiStaTwtConfig: {
 		RPC_ALLOC_ASSIGN(RpcReqWifiStaTwtConfig, req_wifi_sta_twt_config,

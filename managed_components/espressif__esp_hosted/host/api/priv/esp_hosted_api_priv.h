@@ -76,6 +76,7 @@ esp_err_t esp_wifi_remote_sta_get_negotiated_phymode(wifi_phy_mode_t *phymode);
 esp_err_t esp_wifi_remote_sta_get_aid(uint16_t *aid);
 esp_err_t esp_wifi_remote_set_inactive_time(wifi_interface_t ifx, uint16_t sec);
 esp_err_t esp_wifi_remote_get_inactive_time(wifi_interface_t ifx, uint16_t *sec);
+esp_err_t esp_wifi_remote_disable_pmf_config(wifi_interface_t ifx);
 
 #if H_WIFI_HE_SUPPORT
 esp_err_t esp_wifi_remote_sta_twt_config(wifi_twt_config_t *config);

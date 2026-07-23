@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2015-2025 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2015-2026 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -11,10 +11,10 @@
 
 #include "sdkconfig.h"
 
-#if CONFIG_ESP_HOSTED_OT_HOST_ENABLE
-#define H_OT_HOST_ENABLE 1
+#if CONFIG_ESP_HOSTED_HOST_OT_ENABLE
+#define H_HOST_OT_ENABLE 1
 #else
-#define H_OT_HOST_ENABLE 0
+#define H_HOST_OT_ENABLE 0
 #endif
 
 // if enabled, a dedicated UART transport is used for OpenThread

@@ -49,8 +49,8 @@
 
 #define UVC_INTERVAL_DENOMINATOR        (10 * 1000 * 1000)
 #define UVC_TARGET_FPS                  60
-#define UVC_HOST_PORT_CAMERA1           1
-#define UVC_HOST_PORT_CAMERA2           3
+#define UVC_HOST_PORT_FIRST             2
+#define UVC_HOST_PORT_LAST              4
 
 struct uvc_video {
     uvc_host_stream_hdl_t stream_hdl;
@@ -86,25 +86,33 @@ static struct uvc_video_core *s_uvc_video_core = NULL;
 
 static int uvc_parent_port_to_slot(uint8_t parent_port_num)
 {
-#if CONFIG_EXAMPLE_USB_HUB_VALIDATION_MODE && \
-    !CONFIG_EXAMPLE_DUAL_USB_NETWORK_VALIDATION_MODE
-    if (parent_port_num == UVC_HOST_PORT_CAMERA1 ||
-            parent_port_num == UVC_HOST_PORT_CAMERA2) {
-        return 0;
-    }
-    return -1;
-#elif CONFIG_EXAMPLE_USB_MINIMAL_VALIDATION_MODE || CONFIG_EXAMPLE_USB_NETWORK_VALIDATION_MODE
+#if CONFIG_EXAMPLE_USB_UVC_DEVICES_NUM == 1
+    /* Waveshare Type-A guide: DEVICE enables port 1; HOST enables the CH334
+     * downstream ports 2-4.  A single cam1 can use either route unless the
+     * explicit HUB-only validation mode is selected. */
+#if CONFIG_EXAMPLE_USB_HUB_VALIDATION_MODE
+    return parent_port_num >= UVC_HOST_PORT_FIRST &&
+           parent_port_num <= UVC_HOST_PORT_LAST ? 0 : -1;
+#else
+    return (parent_port_num == 0 ||
+            (parent_port_num >= UVC_HOST_PORT_FIRST &&
+             parent_port_num <= UVC_HOST_PORT_LAST)) ? 0 : -1;
+#endif
+#else
+#if CONFIG_EXAMPLE_USB_MINIMAL_VALIDATION_MODE
     if (parent_port_num == 0) {
         return 0;
     }
+    return -1;
 #endif
-    if (parent_port_num == UVC_HOST_PORT_CAMERA1) {
-        return 0;
-    }
-    if (parent_port_num == UVC_HOST_PORT_CAMERA2) {
-        return 1;
+    if (parent_port_num >= UVC_HOST_PORT_FIRST &&
+            parent_port_num <= UVC_HOST_PORT_LAST) {
+        /* Prefer HOST2 for cam1. HOST3/HOST4 prefer cam2; the assignment
+         * function falls back to any free slot so any two HOST sockets work. */
+        return parent_port_num == UVC_HOST_PORT_FIRST ? 0 : 1;
     }
     return -1;
+#endif
 }
 
 static struct uvc_video *uvc_assign_fixed_port_device(struct uvc_video_core *core,
@@ -123,7 +131,17 @@ static struct uvc_video *uvc_assign_fixed_port_device(struct uvc_video_core *cor
 
     struct uvc_video *device = &core->uvc_video[slot];
     if (device->dev_addr != 0 && device->dev_addr != dev_addr) {
-        return NULL;
+        device = NULL;
+        for (int i = 0; i < core->uvc_video_num; i++) {
+            if (core->uvc_video[i].dev_addr == 0 ||
+                    core->uvc_video[i].dev_addr == dev_addr) {
+                device = &core->uvc_video[i];
+                break;
+            }
+        }
+        if (!device) {
+            return NULL;
+        }
     }
 
     device->dev_addr = dev_addr;
@@ -300,7 +318,7 @@ static void uvc_host_driver_event_callback(const uvc_host_driver_event_data_t *e
 
         ESP_LOGI(TAG, "UVC device bound: HUB port %d -> cam%d, dev_addr=%d, stream_index=%d, frame_info_num=%" PRIu32,
                  found_device->parent_port_num,
-                 uvc_parent_port_to_slot(found_device->parent_port_num) + 1,
+                 (int)(found_device - core->uvc_video) + 1,
                  found_device->dev_addr,
                  found_device->stream_index,
                  found_device->frame_info_num);
@@ -332,7 +350,11 @@ static esp_err_t uvc_video_init(struct esp_video *video)
         for (int stream_idx = 0; stream_idx < UVC_INIT_MAX_STREAMS_PER_DEVICE; stream_idx++) {
             size_t frame_list_size = 0;
             /* Try to get frame list - if successful, it's a UVC device with this stream */
-            if (uvc_host_get_frame_list(dev_addr_list[i], stream_idx, NULL, &frame_list_size) == ESP_OK) {
+            esp_err_t frame_list_ret = uvc_host_get_frame_list(dev_addr_list[i], stream_idx, NULL, &frame_list_size);
+            ESP_LOGI(TAG, "UVC scan probe: dev_addr=%u stream_index=%d result=%s frame_info_num=%u",
+                     (unsigned int)dev_addr_list[i], stream_idx, esp_err_to_name(frame_list_ret),
+                     (unsigned int)frame_list_size);
+            if (frame_list_ret == ESP_OK) {
                 if (frame_list_size > 0) {
                     uint8_t parent_port_num = 0;
                     if (uvc_host_get_device_parent_port(dev_addr_list[i], &parent_port_num) != ESP_OK) {
@@ -341,7 +363,7 @@ static esp_err_t uvc_video_init(struct esp_video *video)
                     }
                     ESP_LOGI(TAG, "UVC init scan: dev_addr=%d parent_port=%d stream_index=%d frame_info_num=%u",
                              dev_addr_list[i], parent_port_num, stream_idx, (unsigned int)frame_list_size);
-                    /* Fixed board HOST ports: enumerated hub port1->cam1(slot0), hub port3->cam2(slot1). */
+                    /* Waveshare HOST jumper enables CH334 downstream ports 2-4. */
                     portENTER_CRITICAL(&core->lock);
                     struct uvc_video *assigned = uvc_assign_fixed_port_device(core,
                                                                               dev_addr_list[i],

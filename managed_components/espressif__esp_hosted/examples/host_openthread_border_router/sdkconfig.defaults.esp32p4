@@ -10,7 +10,3 @@ CONFIG_EXAMPLE_CONNECT_WIFI=y
 CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
 
 CONFIG_ESP_CONSOLE_UART_DEFAULT=y
-
-### SW coexistence on the co-processor is on, so this option must be
-### disabled on host to keep OpenThread capabilities consistent
-CONFIG_OPENTHREAD_RX_ON_WHEN_IDLE=n

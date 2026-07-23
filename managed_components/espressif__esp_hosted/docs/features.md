@@ -26,7 +26,7 @@ This page documents the features implemented by ESP-Hosted-MCU.
 
 ## OpenThread
 
-1. **ESP-Hosted / Dedicated UART** support for ESP OpenThread. See [OpenThread Support](openthread.md) for more information
+1. **ESP-Hosted / Dedicated UART** support for ESP OpenThread / Zigbee. See [OpenThread / Zigbee Support](openthread_zigbee.md) for more information
 
 ## Miscellaneous
 

@@ -44,3 +44,10 @@ CONFIG_LWIP_HOOK_IP6_SELECT_SRC_ADDR_CUSTOM=y
 #
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
 # end of ESP System Settings
+
+### SW coexistence on the co-processor is on, so this option must be
+### disabled on host to keep OpenThread capabilities consistent
+CONFIG_OPENTHREAD_RX_ON_WHEN_IDLE=n
+
+### enable ESP-Hosted OpenThread Support
+CONFIG_ESP_HOSTED_HOST_OT_ENABLE=y

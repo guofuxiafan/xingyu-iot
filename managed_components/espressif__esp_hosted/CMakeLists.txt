@@ -124,7 +124,7 @@ if(CONFIG_ESP_HOSTED_ENABLED)
 	endif()
 
 	# OpenThread utility functions
-	if(CONFIG_ESP_HOSTED_OT_HOST_ENABLE)
+	if(CONFIG_ESP_HOSTED_HOST_OT_ENABLE)
 		list(APPEND srcs "${host_dir}/port/esp/freertos/src/port_esp_hosted_host_ot_util.c")
 	endif()
 endif()
@@ -147,6 +147,13 @@ idf_component_register(SRCS ${srcs}
 	PRIV_INCLUDE_DIRS ${priv_include})
 
 idf_component_set_property(${COMPONENT_NAME} WHOLE_ARCHIVE TRUE)
+
+if(DEFINED ENV{ESP_HOSTED_CI_PEDANTIC})
+	target_compile_options(${COMPONENT_LIB} PRIVATE
+		-Werror -Werror=deprecated-declarations -Werror=unused-variable
+		-Werror=unused-but-set-variable -Werror=unused-function
+		$<$<COMPILE_LANGUAGE:C>:-Wstrict-prototypes>)
+endif()
 
 if(CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE)
 	idf_component_optional_requires(PRIVATE sdmmc)

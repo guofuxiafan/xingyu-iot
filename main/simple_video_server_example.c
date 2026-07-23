@@ -514,11 +514,11 @@ void app_main(void)
     return;
 #elif CONFIG_EXAMPLE_USB_NETWORK_VALIDATION_MODE
 #if CONFIG_EXAMPLE_DUAL_USB_NETWORK_VALIDATION_MODE
-    ESP_LOGW(TAG, "Dual USB network validation mode: HUB port 1 -> cam1, port 3 -> cam2; CSI and HTTP are disabled");
+    ESP_LOGW(TAG, "Dual USB network validation mode: any two HOST2-HOST4 sockets -> cam1/cam2; CSI and HTTP are disabled");
 #elif CONFIG_EXAMPLE_USB_CSI_NETWORK_VALIDATION_MODE
-    ESP_LOGW(TAG, "USB + CSI network validation mode: one HUB USB camera plus CSI; HTTP is disabled");
+    ESP_LOGW(TAG, "USB + CSI network validation mode: cam1 may use direct Type-A1 or CH334 HUB; HTTP is disabled");
 #elif CONFIG_EXAMPLE_USB_HUB_VALIDATION_MODE
-    ESP_LOGW(TAG, "USB HUB network validation mode: connect one camera to HUB port 1 or port 3; CSI and HTTP are disabled");
+    ESP_LOGW(TAG, "USB HUB network validation mode: connect one camera to HOST2, HOST3, or HOST4; CSI and HTTP are disabled");
 #else
     ESP_LOGW(TAG, "USB network validation mode: CSI and HTTP are disabled");
 #endif
@@ -532,6 +532,13 @@ void app_main(void)
     ESP_ERROR_CHECK(example_video_init());
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+    if (!wifi_cred_store_is_provisioned()) {
+        ESP_LOGI(TAG, "NVS not provisioned, entering AP provisioning mode");
+        ESP_ERROR_CHECK(provisioning_manager_run_ap_mode());
+        return;
+    }
+
     ESP_ERROR_CHECK(sta_connect_from_nvs());
 
     char pc_ip[16] = {0};
@@ -548,12 +555,12 @@ void app_main(void)
                                                  3072, NULL, 2, NULL, 1);
     ESP_ERROR_CHECK(diag_ok == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
 #if CONFIG_EXAMPLE_DUAL_USB_NETWORK_VALIDATION_MODE
-    ESP_LOGI(TAG, "cam1 and cam2 USB frames streaming to %s; memory diagnostics every 60s", ws_url);
+    ESP_LOGI(TAG, "USB camera initialization pending for cam1/cam2; memory diagnostics every 60s");
 #else
-    ESP_LOGI(TAG, "USB and CSI frames streaming to %s; memory diagnostics every 60s", ws_url);
+    ESP_LOGI(TAG, "CSI frames streaming to %s; cam1 USB initialization pending; memory diagnostics every 60s", ws_url);
 #endif
 #else
-    ESP_LOGI(TAG, "USB frames streaming to %s; CSI and HTTP remain disabled", ws_url);
+    ESP_LOGI(TAG, "USB camera initialization pending for %s; CSI and HTTP remain disabled", ws_url);
 #endif
     return;
 #else

@@ -2,6 +2,31 @@
 
 # Releases
 
+# $${\color{green} \text{2.12.11}}$$
+
+- fixed SDIO deinit tearing down the shared SDMMC host (broke a co-existing SD card on the other slot)
+- fixed public headers failing to build under `-Werror=undef` (e.g. Matter/external host consumers)
+
+# $${\color{green} \text{2.12.10}}$$
+
+- added `esp_wifi_disable_pmf_config()` support (host ↔ co-processor RPC); previously returned `ESP_ERR_NOT_SUPPORTED`
+- fixed SDIO RX heap corruption on transport deinit and hardened RX buffer allocation
+
+# $${\color{green} \text{2.12.9}}$$
+
+- added gpios for `ESP32_P4X_C5_Function_EV_Board V2.0`
+- fix build break for IDF v6 when enable power save (API renamed)
+- update Kconfig to check for config `SOC_GPIO_SUPPORT_HP_PERIPH_PD_SLEEP_WAKEUP` introduced in IDF v6
+- fixed bug causing a crash in SPI-HD interface with IDF v6.1 due to new uninitialised member in `spi_bus_config_t`
+- reduced default number of buffers for SPI-HD and SPI-FD to resolve memory issues
+- Zigbee:
+  - added support for Zigbee
+  - added Home Automation thermostat on a Zigbee Coordinator example
+- added support for SPI-HD 1-bit mode (SPI 3-wire interface)
+  - **NOTE**: SPI-HD 1-bit mode is only supported on ESP-IDF v6.1 and above and requires [git Commit bf10423](https://github.com/espressif/esp-idf/commit/bf10423a5b01888b33ab1f4e45ef5a880eed69e6)
+- updated `_h_get_semaphore` and `_h_lock_mutex` to use milliseconds instead of seconds as a timeout parameter
+- added `_h_thread_yield` for use by threads to request a context switch
+
 # $${\color{green} \text{2.12.8}}$$
 
 - SDIO: added `ESP_HOSTED_MEMPOOL_PREFER_SPIRAM` to allocate transport buffers from PSRAM (e.g. ESP32-P4), saving internal RAM; off by default

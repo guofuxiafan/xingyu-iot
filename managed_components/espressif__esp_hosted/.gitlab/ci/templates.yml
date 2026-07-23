@@ -17,6 +17,7 @@
   stage: build_coprocessor
   tags:
     - build
+  dependencies: []
   artifacts:
     when: always
     expire_in: 4 days
@@ -26,9 +27,9 @@
     - source ${IDF_PATH}/export.sh
     - SDKCONFIG_PATTERN="sdkconfig.ci.${SLAVE_CI_FILE}"
     # Build with IDF pedantic flags and IDF build apps script
-    - export PEDANTIC_FLAGS="-DIDF_CI_BUILD -Werror -Werror=deprecated-declarations -Werror=unused-variable -Werror=unused-but-set-variable -Werror=unused-function"
-    - export EXTRA_CFLAGS="${PEDANTIC_FLAGS} -Wstrict-prototypes"
-    - export EXTRA_CXXFLAGS="${PEDANTIC_FLAGS}"
+    - export ESP_HOSTED_CI_PEDANTIC=1
+    - export EXTRA_CFLAGS="-DIDF_CI_BUILD"
+    - export EXTRA_CXXFLAGS="-DIDF_CI_BUILD"
     - |
       if [[ -n ${CONFIG_OVERRIDE} ]]; then
         CONFIG_OVERRIDE_STRING="--override-sdkconfig-items=${CONFIG_OVERRIDE}"
@@ -43,6 +44,7 @@
   stage: build_example
   tags:
     - build
+  dependencies: []
   artifacts:
     when: always
     expire_in: 4 days
@@ -82,9 +84,9 @@
         echo "Appended sdkconfig.ci.common to sdkconfig.defaults"
       fi
     # Build with IDF pedantic flags and IDF build apps script
-    - export PEDANTIC_FLAGS="-DIDF_CI_BUILD -Werror -Werror=deprecated-declarations -Werror=unused-variable -Werror=unused-but-set-variable -Werror=unused-function"
-    - export EXTRA_CFLAGS="${PEDANTIC_FLAGS} -Wstrict-prototypes"
-    - export EXTRA_CXXFLAGS="${PEDANTIC_FLAGS}"
+    - export ESP_HOSTED_CI_PEDANTIC=1
+    - export EXTRA_CFLAGS="-DIDF_CI_BUILD"
+    - export EXTRA_CXXFLAGS="-DIDF_CI_BUILD"
     # Build with extra ci config file if specified
     - |
       if [ ! -z "${EXAMPLE_CI_FILE}" ]; then
@@ -155,9 +157,9 @@
         echo "Appended sdkconfig.ci.common to sdkconfig.defaults"
       fi
     # Build with IDF pedantic flags and IDF build apps script
-    - export PEDANTIC_FLAGS="-DIDF_CI_BUILD -Werror -Werror=deprecated-declarations -Werror=unused-variable -Werror=unused-but-set-variable -Werror=unused-function"
-    - export EXTRA_CFLAGS="${PEDANTIC_FLAGS} -Wstrict-prototypes"
-    - export EXTRA_CXXFLAGS="${PEDANTIC_FLAGS}"
+    - export ESP_HOSTED_CI_PEDANTIC=1
+    - export EXTRA_CFLAGS="-DIDF_CI_BUILD"
+    - export EXTRA_CXXFLAGS="-DIDF_CI_BUILD"
     # use --config-file to override default IDF config file
     # use --enable-preview-targets to build for all targets
     # use --override-sdkconfig-items to override (possibly incorrect) build target that may be in provided config file
@@ -223,9 +225,9 @@
       fi
     - echo "SDKCONFIG_PATTERN is ${SDKCONFIG_PATTERN}"
     # Build with IDF pedantic flags and IDF build apps script
-    - export PEDANTIC_FLAGS="-DIDF_CI_BUILD -Werror -Werror=deprecated-declarations -Werror=unused-variable -Werror=unused-but-set-variable -Werror=unused-function"
-    - export EXTRA_CFLAGS="${PEDANTIC_FLAGS} -Wstrict-prototypes"
-    - export EXTRA_CXXFLAGS="${PEDANTIC_FLAGS}"
+    - export ESP_HOSTED_CI_PEDANTIC=1
+    - export EXTRA_CFLAGS="-DIDF_CI_BUILD"
+    - export EXTRA_CXXFLAGS="-DIDF_CI_BUILD"
     # use --config-file to override default IDF config file
     # use --enable-preview-targets to build for all targets
     # use --override-sdkconfig-items to override (possibly incorrect) build target that may be in provided config file
@@ -297,9 +299,9 @@
       fi
     - echo "SDKCONFIG_PATTERN is ${SDKCONFIG_PATTERN}"
     # Build with IDF pedantic flags and IDF build apps script
-    - export PEDANTIC_FLAGS="-DIDF_CI_BUILD -Werror -Werror=deprecated-declarations -Werror=unused-variable -Werror=unused-but-set-variable -Werror=unused-function"
-    - export EXTRA_CFLAGS="${PEDANTIC_FLAGS} -Wstrict-prototypes"
-    - export EXTRA_CXXFLAGS="${PEDANTIC_FLAGS}"
+    - export ESP_HOSTED_CI_PEDANTIC=1
+    - export EXTRA_CFLAGS="-DIDF_CI_BUILD"
+    - export EXTRA_CXXFLAGS="-DIDF_CI_BUILD"
     # Remove the conflicting extconn config that disables hosted
     - rm -f sdkconfig.ci.*extconn*
     # use --config-file to override default IDF config file

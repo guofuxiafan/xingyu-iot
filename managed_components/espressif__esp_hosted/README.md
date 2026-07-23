@@ -158,7 +158,6 @@ Legends:
 - iperf : iperf2 with test results in Mbits/sec
 
 > [!NOTE]
->
 > For the shield box readings marked with (S), full network set up explained in [Shield Box Test Setup](shield-box-test-setup.md)
 
 **Host can be any ESP chipset or any non-ESP MCU.**
@@ -167,6 +166,7 @@ Legends:
 | Transport | Type | Num of GPIOs | Setup with | Co-processor supported | Host Tx iperf | Host Rx iperf | Remarks |
 |:---------------:|:-----:|:------------:|:----------------:|:--------------:|:------------:|:-----------:|:--------------------------:|
 | Standard SPI | FD | 6 | jumper or PCB | Any_Slave | udp: 24 tcp: 22 | udp: 25 tcp: 22| Simplest solution for quick test |
+| 1-bit SPI | HD | 4 | jumper or PCB | Any_Slave <sub>[1]</sub> | udp: 22 tcp: 19 <sub>(O)</sub> | udp: 20 tcp: 17 <sub>(O)</sub> | 1-bit, half duplex |
 | Dual SPI | HD | 5 | jumper or PCB | Any_Slave <sub>[1]</sub> | udp: 32 tcp: 26 <sub>(O)</sub> | udp: 33 tcp: 25 <sub>(O)</sub> | Better throughput, but half duplex |
 | Quad SPI | HD | 7 | PCB only | Any_Slave <sub>[1]</sub> | udp: 41 tcp: 29 <sub>(O)</sub> | udp: 42 tcp: 28 <sub>(O)</sub> | Due to signal integrity, PCB is mandatory |
 | SDIO 1-Bit | HD | 4  | jumper or PCB | ESP32, ESP32-C6, ESP32-C5, ESP32-C61 | TBD | TBD | Stepping stone for PCB based SDIO 4-bit |
@@ -174,12 +174,15 @@ Legends:
 | Only BT over UART | FD | 2 or 4 | jumper or PCB | Any_Slave | NA | NA | Dedicated Bluetooth over UART pins |
 | UART | FD | 2 | jumper or PCB | Any_Slave | udp: 0.68 tcp: 0.67 <sub>(O)</sub> | udp: 0.68 tcp: 0.60 <sub>(O)</sub> | UART dedicated for BT & Wi-Fi <sub>[2]</sub> |
 | Dedicated platforms | FD | Extra 2 or 4 | jumper or PCB | Any_Slave | NA | NA | UART dedicated for BT & Wi-Fi on any other transport |
+
 > [!NOTE]
-> - [1] Dual/Quad SPI is not supported on ESP32
+> - [1] 1-bit/Dual/Quad SPI is not supported on ESP32
 > - [2] UART is suitable only for low throughput environments. Throughput was obtained with a baud rate of 921600. On the ESP32-P4 + C6 development board, a baud rate of 4 Mbits/s can be achieved, giving TCP/UDP throughput of around 3.3 MBits/s.
 > - [3] SDIO 4-Bit performance figures are measured with ESP32-C6 in shield box with 40MHz bandwidth
 > - (S) Shield box measurements
 > - (O) Over-the-air measurements
+> - FD Full duplex interface
+> - HD Half duplex interface
 
 With jumper cables, 'Standard SPI' and 'Dual SPI' solutions are easiest to evaluate, without much of hardware dependencies. SDIO 1-Bit can be tested with jumper cables, but it needs some additional hardware config, such as installation of external pull-up registers.
 
@@ -191,42 +194,41 @@ In case case of dedicated platforms, Bluetooth uses standard HCI over UART. In r
 
 Host and slave always populate below header at the start of every frame, irrespective of actual or dummy data in payload.
 
-| Field          | Type     | Bits | Mandatory? | Description                                                                 |
-|----------------|----------|------|------------|-----------------------------------------------------------------------------|
-| if_type        | uint8_t  | 4    | M          | Interface type                                                              |
-| if_num         | uint8_t  | 4    | M          | Interface number                                                            |
-| flags          | uint8_t  | 8    | M          | Flags for additional information                                            |
-| len            | uint16_t | 16   | M          | Length of the payload                                                       |
-| offset         | uint16_t | 16   | M          | Offset for the payload                                                      |
-| checksum       | uint16_t | 16   | M          | Checksum for error detection  (0 if checksum disabled)                      |
-| seq_num        | uint16_t | 16   | O          | Sequence number for tracking packets (Useful in debugging)                  |
-| throttle_cmd   | uint8_t  | 0 or 2    | O          | Flow control command                                                            |
-| reserved2      | uint8_t  | 6 or 8    | M          | Reserved bits                                                               |
-| reserved3      | uint8_t  | 8    | M          | Reserved byte (union field)                                                 |
-| hci\_pkt\_type or priv\_pkt\_type   | uint8_t  | 8    | M          | Packet type for HCI interface (union field)                                 |
+| Field                             | Type     | Bits   | Mandatory? | Description                                                |
+|-----------------------------------|----------|--------|------------|------------------------------------------------------------|
+| if_type                           | uint8_t  | 4      | M          | Interface type                                             |
+| if_num                            | uint8_t  | 4      | M          | Interface number                                           |
+| flags                             | uint8_t  | 8      | M          | Flags for additional information                           |
+| len                               | uint16_t | 16     | M          | Length of the payload                                      |
+| offset                            | uint16_t | 16     | M          | Offset for the payload                                     |
+| checksum                          | uint16_t | 16     | M          | Checksum for error detection  (0 if checksum disabled)     |
+| seq_num                           | uint16_t | 16     | O          | Sequence number for tracking packets (Useful in debugging) |
+| throttle_cmd                      | uint8_t  | 0 or 2 | O          | Flow control command                                       |
+| reserved2                         | uint8_t  | 6 or 8 | M          | Reserved bits                                              |
+| reserved3                         | uint8_t  | 8      | M          | Reserved byte (union field)                                |
+| hci\_pkt\_type or priv\_pkt\_type | uint8_t  | 8      | M          | Packet type for HCI interface (union field)                |
 
 ### 7.2 Interface Types
 
 Start of header states which type of frame is being carried.
 
-| Interface Type       | Value | Description                                      |
-|----------------------|-------|--------------------------------------------------|
-| ESP\_INVALID\_IF       | 0     | Invalid interface                                |
-| ESP\_STA\_IF           | 1     | Station frame                                    |
-| ESP\_AP\_IF            | 2     | SoftAP frame                                     |
-| ESP\_SERIAL\_IF        | 3     | Control frame                                    |
-| ESP\_HCI\_IF           | 4     | Bluetooth Hosted HCI frame                       |
-| ESP\_PRIV\_IF          | 5     | Private communication between slave and host     |
-| ESP\_TEST\_IF          | 6     | Transport throughput test                        |
-| ESP\_ETH\_IF           | 7     | Invalid                                          |
-| ESP\_MAX\_IF           | 8     | type mentioned in dummy or empty frame           |
+| Interface Type   | Value | Description                                  |
+|------------------|-------|----------------------------------------------|
+| ESP\_INVALID\_IF | 0     | Invalid interface                            |
+| ESP\_STA\_IF     | 1     | Station frame                                |
+| ESP\_AP\_IF      | 2     | SoftAP frame                                 |
+| ESP\_SERIAL\_IF  | 3     | Control frame                                |
+| ESP\_HCI\_IF     | 4     | Bluetooth Hosted HCI frame                   |
+| ESP\_PRIV\_IF    | 5     | Private communication between slave and host |
+| ESP\_TEST\_IF    | 6     | Transport throughput test                    |
+| ESP\_ETH\_IF     | 7     | Invalid                                      |
+| ESP\_MAX\_IF     | 8     | type mentioned in dummy or empty frame       |
 
 ## 8 Detailed Setup
 
 Once you decided the transport to use, this section should guide how to set this transport, with hardware connections, configurations and verification. Users can evaluate one transport first and then move to other.
 
 > [!IMPORTANT]
->
 > [Design Considerations](https://github.com/espressif/esp-hosted-mcu/blob/main/docs/design_consideration.md) that could be referred to, before you stick to any transport option. Referring to these consideration would help to get you faster to solution, make your design stable and less error-prone.
 
 

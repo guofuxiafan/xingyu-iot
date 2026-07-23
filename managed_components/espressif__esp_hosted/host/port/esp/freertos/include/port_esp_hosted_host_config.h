@@ -9,7 +9,9 @@
 
 #include "sdkconfig.h"
 #include "esp_task.h"
+#include "esp_idf_version.h"
 
+#include "esp_idf_version.h"
 #include "esp_wifi_remote.h"
 
 #ifdef CONFIG_ESP_HOSTED_ENABLED
@@ -316,6 +318,7 @@ enum {
   #define H_SPI_HD_HOST_INTERFACE 1
 
   enum {
+    H_SPI_HD_CONFIG_1_DATA_LINE,
     H_SPI_HD_CONFIG_2_DATA_LINES,
     H_SPI_HD_CONFIG_4_DATA_LINES,
   };
@@ -338,6 +341,10 @@ enum {
 
   #define H_SPI_HD_HOST_NUM_DATA_LINES                 CONFIG_ESP_HOSTED_SPI_HD_INTERFACE_NUM_DATA_LINES
 
+#if (H_SPI_HD_HOST_NUM_DATA_LINES == 1) && (ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(6,1,0))
+#error "1-bit SPI-HD mode only supported in ESP-IDF v6.1 and above"
+#endif
+
   #define H_SPI_HD_PORT_D0                             NULL
   #define H_SPI_HD_PORT_D1                             NULL
   #define H_SPI_HD_PORT_D2                             NULL
@@ -346,7 +353,11 @@ enum {
   #define H_SPI_HD_PORT_CLK                            NULL
 
   #define H_SPI_HD_PIN_D0                              CONFIG_ESP_HOSTED_SPI_HD_GPIO_D0
-  #define H_SPI_HD_PIN_D1                              CONFIG_ESP_HOSTED_SPI_HD_GPIO_D1
+  #if (CONFIG_ESP_HOSTED_SPI_HD_INTERFACE_NUM_DATA_LINES >= 2)
+    #define H_SPI_HD_PIN_D1                              CONFIG_ESP_HOSTED_SPI_HD_GPIO_D1
+  #else
+    #define H_SPI_HD_PIN_D1                              -1
+  #endif
   #if (CONFIG_ESP_HOSTED_SPI_HD_INTERFACE_NUM_DATA_LINES == 4)
     #define H_SPI_HD_PIN_D2                              CONFIG_ESP_HOSTED_SPI_HD_GPIO_D2
     #define H_SPI_HD_PIN_D3                              CONFIG_ESP_HOSTED_SPI_HD_GPIO_D3
@@ -358,7 +369,14 @@ enum {
   #define H_SPI_HD_PIN_CS                              CONFIG_ESP_HOSTED_SPI_HD_GPIO_CS
   #define H_SPI_HD_PIN_CLK                             CONFIG_ESP_HOSTED_SPI_HD_GPIO_CLK
   #define H_SPI_HD_PORT_DATA_READY                     NULL
-  #define H_SPI_HD_PIN_DATA_READY                      CONFIG_ESP_HOSTED_SPI_HD_GPIO_DATA_READY
+  #ifdef CONFIG_ESP_HOSTED_SPI_HD_DATA_READY_ENABLED
+    #define H_SPI_HD_PIN_DATA_READY                      CONFIG_ESP_HOSTED_SPI_HD_GPIO_DATA_READY
+    #define H_SPI_HD_DATA_READY_ENABLED                  1
+  #else
+    #define H_SPI_HD_PIN_DATA_READY                      -1
+    #define H_SPI_HD_DATA_READY_ENABLED                  0
+    #define H_SPI_HD_POLL_INTERVAL_MS                    CONFIG_ESP_HOSTED_SPI_HD_POLL_INTERVAL_MS
+  #endif
 
   #define H_SPI_HD_CLK_MHZ                             CONFIG_ESP_HOSTED_SPI_HD_CLK_FREQ
   #define H_SPI_HD_MODE                                CONFIG_ESP_HOSTED_SPI_HD_MODE
@@ -568,6 +586,16 @@ enum {
     #define H_HOST_PS_ALLOWED 0
   #endif
 
+  /**
+   * In IDF 6.0.0 and above,
+   * esp_deep_sleep_enable_gpio_wakeup() is now
+   * esp_sleep_enable_gpio_wakeup_on_hp_periph_powerdown()
+   */
+  #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
+    #define H_HOST_USE_HP_PERIPH_POWERDOWN 1
+  #else
+    #define H_HOST_USE_HP_PERIPH_POWERDOWN 0
+  #endif
   /* Amend later for light sleep */
 #else
     #define H_HOST_PS_ALLOWED 0

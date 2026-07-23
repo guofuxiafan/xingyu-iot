@@ -262,6 +262,10 @@ typedef struct {
 	uint16_t sec;
 } rpc_wifi_inactive_time_t;
 
+typedef struct {
+	wifi_interface_t ifx;
+} rpc_wifi_disable_pmf_config_t;
+
 #if H_WIFI_HE_SUPPORT
 typedef struct {
 	int flow_id;
@@ -483,6 +487,8 @@ typedef struct Ctrl_cmd_t {
 		rpc_wifi_sta_get_aid_t      wifi_sta_get_aid;
 
 		rpc_wifi_inactive_time_t    wifi_inactive_time;
+
+		rpc_wifi_disable_pmf_config_t wifi_disable_pmf_config;
 
 		rpc_coprocessor_fwversion_t coprocessor_fwversion;
 
@@ -849,6 +855,7 @@ ctrl_cmd_t * rpc_slave_feature_command(ctrl_cmd_t *req);
 ctrl_cmd_t * rpc_slaveif_iface_mac_addr_len_get(ctrl_cmd_t *req);
 ctrl_cmd_t * rpc_slaveif_wifi_set_inactive_time(ctrl_cmd_t *req);
 ctrl_cmd_t * rpc_slaveif_wifi_get_inactive_time(ctrl_cmd_t *req);
+ctrl_cmd_t * rpc_slaveif_wifi_disable_pmf_config(ctrl_cmd_t *req);
 ctrl_cmd_t * rpc_slaveif_wifi_sta_twt_config(ctrl_cmd_t *req);
 ctrl_cmd_t * rpc_slaveif_wifi_sta_itwt_setup(ctrl_cmd_t *req);
 ctrl_cmd_t * rpc_slaveif_wifi_sta_itwt_teardown(ctrl_cmd_t *req);

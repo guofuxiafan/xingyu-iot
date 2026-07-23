@@ -55,12 +55,10 @@ The ESP32 family of chips (except the ESP32) support the SPI co-processor HD (Ha
 In this mode of operation, SPI supports 2 or 4 data lines to transfer data to the co-processor or from the co-processor (half duplex) during an SPI transaction. This is different from 'standard' SPI mode which transfers data bidirectionally (full duplex) over two data lines (one for host to co-processor data [MOSI], one for co-processor to host data [MISO]) during an SPI transaction.
 
 > [!NOTE]
->
 > SPI Half Duplex mode is not supported on the classic ESP32. Other all chipsets support half duplex.
 > Please use SPI full duplex for classic ESP32
 
 > [!IMPORTANT]
->
 > SPI Half Duplex is not an industry standard and has multiple
 > implementations. Make sure your host processor supports the SPI HD
 > protocol implemented by the Hosted co-processor before proceeding. See [SPI HD protocol used by Hosted](#4-spi-hd-protocol).
@@ -69,19 +67,34 @@ In this mode of operation, SPI supports 2 or 4 data lines to transfer data to th
 
 To enable SPI HD on the Host and co-processor using `idf.py menuconfig`:
 
-1. On Host: **Component config** ---> **ESP-Hosted config** --->
-   **Transport layer** and choose **SPI Half-duplex**.
-2. On Co-processor: **Example configuration** ---> **Transport layer** and
-   choose **SPI Half-duplex**.
+On Host:
+
+```
+Component config
+└── ESP-Hosted config
+    ├── Transport layer ──> SPI Half-duplex
+    └── (configure SPI Half-duplex parameters)
+```
+
+On Co-processor:
+
+```
+Example Configuration
+└── Bus Config in between Host and Co-processor
+    ├── Transport layer ──> SPI Half-duplex
+    └── (configure SPI Half-duplex parameters)
+```
 
 ### 3.1 Clock and Phase
 
-The standard SPI CPOL clock and CPHA phase must be configured
-correctly on both the host and co-processor for the protocol to work.
+The standard SPI CPOL clock and CPHA phase must be configured correctly on both the host and co-processor for the protocol to work.
 
 ### 3.2 Data Lines
 
-Both the host and co-processor can support two or four data lines. Four data lines will be used to transfer data if configured on both the host and co-processor. If the host is configured to use two data lines, only two lines will be used to transfer data even if the co-processor is configured to use four data lines.
+Both the host and co-processor can support one, two or four data lines. Four data lines will be used to transfer data if configured on both the host and co-processor. If the host is configured to use two data lines, only two lines will be used to transfer data even if the co-processor is configured to use four data lines.
+
+> [!WARNING]
+> One data line support must be configured on both the host and co-processor for the transport to work.
 
 ### 3.3 Extra GPIO Signals
 
@@ -95,9 +108,15 @@ assigned to any free GPIO pins:
 > The `Reset` signal can be configured to connect to the `EN` or `RST`
 > pin on the co-processor, or assigned to a GPIO pin on the co-processor.
 >
-> To configure this, use `idf.py menuconfig` on the co-processor: **Example
-> configuration** ---> **SPI Half-duplex Configuration** --->
-> **GPIOs** and set **Slave GPIO pin to reset itself**.
+> To configure this, use `idf.py menuconfig` on the co-processor:
+>
+> ```
+> Example Configuration
+> └── Bus Config in between Host and Co-processor
+>     └── SPI Half-duplex Configuration
+>         └── GPIOs
+>             └── Slave GPIO pin to reset itself
+> ```
 
 ### 3.4 Pin Assignments
 

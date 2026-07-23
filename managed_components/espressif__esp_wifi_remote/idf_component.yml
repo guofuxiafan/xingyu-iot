@@ -2,7 +2,7 @@ dependencies:
   espressif/esp_hosted:
     rules:
     - if: target in [esp32h2, esp32p4]
-    version: '>=2.11'
+    version: '>=2.11,<3.0'
   espressif/wifi_remote_over_eppp:
     version: '>=0.1'
   idf:
@@ -10,7 +10,7 @@ dependencies:
 description: Utility wrapper for esp_wifi functionality on remote targets
 repository: git://github.com/espressif/esp-wifi-remote.git
 repository_info:
-  commit_sha: c595a0fc90fd3dee9fbdec9ecbfb62f2bd9957e4
+  commit_sha: 6ac00cf049864b838d95d4fe5da728244caaa143
   path: components/esp_wifi_remote
 url: https://github.com/espressif/esp-wifi-remote
-version: 1.6.1
+version: 1.6.3

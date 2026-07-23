@@ -1,255 +1,122 @@
-| Supported Targets | ESP32-P4 | ESP32-S3 | ESP32-C3 | ESP32-C6 | ESP32-C5 |
-|-------------------|----------|----------|----------|----------|----------|
+# ESP32-P4 摄像头采集与 WebSocket 推流
 
-[中文版本](./README_CN.md)
+本项目基于 ESP-IDF 与乐鑫 `simple_video_server` 示例改造，面向 Waveshare ESP32-P4-WIFI6-DEV-KIT。它可采集 MIPI-CSI 和 USB UVC 摄像头画面，将帧编码为 JPEG 后推送到局域网 PC；在常规模式下还提供用于查看设备状态和调节 JPEG 质量的网页界面。
 
-# Simple Video Server Example
+## 当前默认配置
 
-*(See the [README.md](../README.md) file in the upper level [examples](../) directory for more information about examples.)*
+- 目标芯片：ESP32-P4；适配 Waveshare ESP32-P4-WIFI6-DEV-KIT。
+- 网络：板载 ESP32-C6 通过 ESP-HOSTED/SDIO 提供 Wi-Fi；也可按 ESP-IDF 配置改用以太网。
+- 摄像头：默认启用 OV5647 MIPI-CSI 与一台 USB UVC 摄像头；可在 `menuconfig` 中调整传感器、分辨率与 USB 摄像头数量。
+- 默认运行模式：USB + CSI 网络验证模式。CSI 画面为 `cam0`，USB UVC 画面为 `cam1`，二者通过 WebSocket 推送到 PC；此模式不启动普通网页 HTTP 服务。
+- 图像传输：设备读取 NVS 中保存的 PC IP，并连接 `ws://<PC_IP>:8765`。每个二进制消息为：`8 字节小端时间戳 + 1 字节摄像头 ID + 2 字节大端 JPEG 长度 + JPEG 数据`。
 
-## Overview
+## 功能概览
 
-This example demonstrates how to create multiple HTTP servers on a local network using different ports. These servers can be accessed through a web browser to provide video streaming, still image capture, raw frame download, and camera setting updates.
+- 基于 ESP Video/V4L2 的 CSI 与 USB UVC 采集；非 JPEG 输入会编码为 JPEG。
+- USB 摄像头初始化失败或运行时掉线时自动重试。
+- WebSocket 发送队列与固定帧池，避免采集任务被网络发送阻塞。
+- 首次使用或长按 BOOT 键时启动 AP 配网页；保存 Wi-Fi 凭据和 PC IP 到 NVS。
+- 常规模式提供 mDNS（默认 `esp-web.local`）、设备状态 API 和 JPEG 质量设置 API。
+- 可选 USB 最小验证、USB 经 HUB、USB + CSI、双 USB 等调试模式。
+- 每 60 秒输出一次堆内存与 PSRAM 诊断信息（仅特定网络验证模式）。
 
-The firmware initializes the selected `esp_video` camera devices, connects to the configured network, starts the main web UI on port 80, and starts one MJPEG stream server per detected camera starting at port 81. The web UI assets under `frontend/gzipped` are embedded into the firmware image.
+## 快速开始
 
-## API Endpoints
+### 1. 准备环境
 
-The example provides the following REST API endpoints:
+- ESP-IDF 5.4 或更高版本（建议与当前依赖兼容的版本）。
+- Python 与 ESP-IDF 工具链。
+- 若修改网页前端：Node.js 20+、pnpm 和可用的 `gzip`。
+- Waveshare ESP32-P4-WIFI6-DEV-KIT、OV5647（可选）和 USB UVC 摄像头。
 
-| Port | Endpoint | Method | Description |
-|:----:|:---------|:------:|:------------|
-| 80 | `/` | GET | Serves the main HTML page for browser-based video display |
-| 80 | `/api/capture_image?source={n}` | GET | Returns JPEG-formatted images from the specified camera sensor.<br/>**Parameter**: `n` - Camera sensor number (0 = first sensor, 1 = second sensor)<br/>**Example**: `/api/capture_image?source=0` |
-| 80 | `/api/capture_binary?source={n}` | GET | Returns raw binary image data from the specified camera sensor.<br/>**Parameter**: `n` - Camera sensor number (0 = first sensor, 1 = second sensor)<br/>**Example**: `/api/capture_binary?source=0` |
-| 80 | `/api/get_camera_info` | GET | Retrieves information about all camera sensors, including resolution and JPEG compression settings |
-| 80 | `/api/set_camera_config` | POST | Configures camera sensor settings including resolution and JPEG compression |
-| 81 | `/stream` | GET | Provides continuous MJPEG stream from the **first** camera sensor (*1) |
-| 82 | `/stream` | GET | Provides continuous MJPEG stream from the **second** camera sensor (*1) |
+### 2. 配置并构建固件
 
-> **Note (*1)**: The server continuously streams JPEG images from the background to the client. When saving images from the webpage, the saved images may not reflect real-time data.
-
-### Domain Name Access
-
-By default, the example enables mDNS (Multicast DNS), allowing you to access the server using a domain name instead of an IP address. For example:
-- Image capture: `http://esp-web.local/api/capture_image?source=0`
-- Main interface: `http://esp-web.local`
-
-You can also access all URLs using the device's IP address directly.
-
-## Getting Started
-
-### Hardware Configuration
-
-Before using this example, please refer to the [video initialization configuration guide](components/example_video_common/README.md) for detailed information about:
-- Board-level configuration
-- Camera sensor interface setup
-- GPIO pin assignments
-- Clock frequency settings
-
-The ESP32-P4 defaults select the ESP32-P4-Function-EV-Board V1.5 profile, enable MIPI-CSI, and select the OV5647 MIPI RAW8 `800 x 1280` sensor format. Change these options when using another board revision or camera module.
-
-### Project Configuration
-
-Open the project configuration menu:
+在 ESP-IDF 已导出的终端中执行：
 
 ```bash
+idf.py set-target esp32p4
 idf.py menuconfig
+idf.py build
+idf.py -p COMx flash monitor
 ```
 
-#### Network Connection Setup
+在 `menuconfig` 中重点确认：
 
-Navigate to **Example Connection Configuration**:
+- 摄像头接口和型号：`Example Video Initialization Configuration` 与 `Espressif Camera Sensors Configurations`。
+- 板载 C6 的 Wi-Fi Remote/ESP-HOSTED 配置，或改为以太网。
+- `Example Configuration` 中的 USB/CSI 验证模式、缓冲区数量、USB UVC URB 数和 JPEG 质量。
+- `Provisioning Configuration` 中的配网 AP 名称、重试次数和长按 BOOT 的时长。
 
-**Wi-Fi Interface Configuration:**
-- **Wi-Fi SSID and Password**: Required for ESP32 to connect to your network
-- **SoftAP Settings**: Configure if you want the ESP32 to work as an Access Point
+项目的 `sdkconfig.defaults.esp32p4` 已包含 16 MB Flash、PSRAM、C6 SDIO、OV5647 和 USB UVC 的默认设置。Waveshare 板级适配细节见 [PORTING_WAVESHARE.md](PORTING_WAVESHARE.md)。
 
-The base `sdkconfig.defaults` selects Wi-Fi connection mode. If your ESP32-P4 setup relies on remote Wi-Fi, configure `esp_wifi_remote` and the slave target before expecting the web server to appear on the network.
+### 3. 首次配网和接收端
 
-**Ethernet Interface Configuration:**
-- **PHY Model**: Select your PHY model (e.g., IP101) in `Ethernet PHY` option
-- **PHY Address**: Set based on your board schematic in `PHY Address` option
-- **Clock Configuration**: Configure EMAC Clock mode and SMI GPIO pins
+设备没有保存 Wi-Fi 凭据时会建立 AP 配网热点。连接热点后，在浏览器中填写 Wi-Fi SSID、密码及接收 PC 的 IPv4 地址；设备会保存设置并连接路由器。PC 接收服务需监听 8765 端口并按上述 WebSocket 二进制帧格式解析数据。
 
-**Wi-Fi Remote Configuration** (for devices without native WiFi support):
+若网络连接失败，设备会在重试后重启并再次尝试；长按 BOOT 键可清除已保存的网络配置并重新进入配网模式。
 
-[esp_wifi_remote](https://github.com/espressif/esp-protocols/tree/master/components/esp_wifi_remote) is used by default to provide additional WiFi interface capability.
+## 运行模式
 
-In the `Wi-Fi Remote` menu:
-- Select the slave target to connect to the MCU
+| 模式 | 用途 | 网络/HTTP |
+| --- | --- | --- |
+| USB 最小验证 | 单 USB UVC 摄像头，定位 USB 等时传输问题 | 不启用 Wi-Fi、WebSocket、HTTP、mDNS 和配网 |
+| USB 网络验证 | 单 USB UVC 摄像头向 PC 推流 | Wi-Fi + WebSocket，无普通 HTTP |
+| USB HUB 验证 | 单摄像头经 Waveshare CH334 HUB 的 HOST2–HOST4 端口接入 | 同 USB 网络验证 |
+| USB + CSI 网络验证 | `cam0` CSI 与 `cam1` USB 同时推流 | 当前默认；Wi-Fi + WebSocket，无普通 HTTP |
+| 双 USB 网络验证 | 两路 USB UVC 摄像头推流 | Wi-Fi + WebSocket，无普通 HTTP |
+| 常规模式 | 摄像头采集、网页管理及可选 WebSocket 推流 | 启动 HTTP/mDNS；配置了 PC IP 时同时推流 |
 
-#### Camera Sensor Configuration
+模式开关位于 `idf.py menuconfig` 的 **Example Configuration**。USB 摄像头接入不同物理端口时，应同时核对板卡跳线与 USB/HUB 相关配置。
 
-Navigate to **Espressif Camera Sensors Configurations**:
-- Select the camera sensor you want to use
-- Choose the target output format for the sensor
+## 常规模式的网页与 API
 
-#### Example-Specific Configuration
+常规模式下，设备在端口 80 提供网页和 API；默认可通过 `http://esp-web.local` 或设备 IP 访问。
 
-1. **Set the target platform:**
-   ```bash
-   idf.py set-target esp32p4
-   idf.py menuconfig
-   ```
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/` | 返回内嵌的 Vue 网页资源 |
+| GET | `/api/get_camera_info` | 返回已激活摄像头的编号、类型、分辨率、帧率和 JPEG 质量能力 |
+| POST | `/api/set_camera_config` | 设置 JPEG 质量，请求体示例：`{"index": 0, "jpeg_quality": 80}` |
+| POST | `/api/set_wifi_config` | 仅 AP 配网页使用，保存 Wi-Fi 与 PC IP |
 
-2. **Configure video buffer settings:**
-   ```
-   Example Configuration  --->
-       (2) Camera video buffer number
-   ```
+注意：当前默认的 USB + CSI 网络验证模式不会启动这些 HTTP 接口；需要网页管理时请关闭 `USB Wi-Fi/WebSocket validation mode`，使用常规模式。
 
-   > **Recommendation**: More buffers provide better performance and reduce frame drops but consume more memory. For high-resolution sensors (e.g., 1080P), use 2 buffers.
+## 网页前端
 
-3. **Set JPEG compression quality:**
-   ```
-   Example Configuration  --->
-       (80) JPEG compression quality (%)
-   ```
+前端位于 `frontend/`，使用 Vue 3、TypeScript、Vite 与 Vuetify。修改前端后重新生成压缩资源，再构建固件：
 
-   > **Note**: Not all camera sensors support this setting. If unsupported, the example will automatically select the nearest supported value.
-
-4. **HTTP and mDNS configuration:**
-   ```
-   Example Configuration  --->
-       (123456789000000000000987654321) HTTP part boundary
-       (web-cam) mDNS instance
-       (esp-web) mDNS host name
-   ```
-
-   > **Recommendation**: Keep these default settings unless you have specific requirements.
-
-5. **Camera sensor interface selection:**
-
-   The example will initialize all enabled camera sensors and stream their output to clients:
-
-   ```
-   Example Video Initialization Configuration  --->
-       Select and Set Camera Sensor Interface  --->
-           [*] MIPI-CSI  ---
-           [*] DVP  ---->
-   ```
-
-6. **Shared I2C bus configuration:**
-
-   If your camera sensors share the same I2C GPIO pins (such as MIPI-CSI and DVP sensors on the ESP32-P4-Function-EV-Board V1.5):
-
-   ```
-   Example Video Initialization Configuration  --->
-       [*] Use Pre-initialized SCCB(I2C) Bus for All Camera Sensors And Motors
-           (0) SCCB(I2C) Port Number
-           (8) SCCB(I2C) SCL Pin
-           (7) SCCB(I2C) SDA Pin
-   ```
-
-7. **Select target camera sensors:**
-
-   Choose sensors based on your development board:
-
-   ```
-   Component config  --->
-       Espressif Camera Sensors Configurations  --->
-           Camera Sensor Configuration  --->
-               Select and Set Camera Sensor  --->
-                   [ ] GC0308  ----
-                   [*] GC2145  --->
-                   [*] OV2640  ---->
-   ```
-
-8. **Optimize DVP interface performance:**
-
-   For better frame rates with DVP interface camera sensors:
-
-   ```
-   Component config  --->
-       Espressif Camera Sensors Configurations  --->
-           Camera Sensor Configuration  --->
-               Select and Set Camera Sensor  --->
-                   [*] OV2640  ---->
-                       Select default output format for DVP interface (JPEG 640x480 25fps, DVP 8-bit, 20M input)  --->
-                           ( ) YUV422 640x480 6fps, DVP 8-bit, 20M input
-                           (X) JPEG 640x480 25fps, DVP 8-bit, 20M input
-                           ( ) RGB565 240x240 25fps, DVP 8-bit, 20M input
-   ```
-
-9. **MIPI-CSI crop support:**
-
-   If MIPI-CSI crop is enabled, configure the crop origin and size in
-   **Example Configuration**. Keep the crop origin even and make sure the crop
-   width and height do not exceed the selected sensor output frame.
-
-## Building and Running
-
-1. **Build and flash the project:**
-   ```bash
-   idf.py set-target esp32p4
-   idf.py -p PORT flash monitor
-   ```
-
-   *(Press `Ctrl-]` to exit the serial monitor)*
-
-2. **For complete setup instructions**, see the [ESP-IDF Getting Started Guide](https://docs.espressif.com/projects/esp-idf/en/latest/esp32p4/get-started/index.html).
-
-## Expected Output
-
-When running this example, you should see output similar to this in the serial monitor:
-
-```
-...
-I (1628) main_task: Started on CPU0
-I (1638) esp_psram: Reserving pool of 32K of internal memory for DMA/internal allocations
-I (1638) main_task: Calling app_main()
-I (1648) mdns_mem: mDNS task will be created from internal RAM
-I (1698) esp_eth.netif.netif_glue: 60:55:f9:fb:c2:3a
-I (1698) esp_eth.netif.netif_glue: ethernet attached to netif
-I (3298) ethernet_connect: Waiting for IP(s).
-I (3298) ethernet_connect: Ethernet Link Up
-I (4648) ethernet_connect: Got IPv6 event: Interface "example_netif_eth" address: fe80:0000:0000:0000:6255:f9ff:fefb:c23a, type: ESP_IP6_ADDR_IS_LINK_LOCAL
-I (5298) esp_netif_handlers: example_netif_eth ip: 172.168.30.45, mask: 255.255.255.0, gw: 172.168.30.1
-I (5298) ethernet_connect: Got IPv4 event: Interface "example_netif_eth" address: 172.168.30.45
-I (5298) example_common: Connected to example_netif_eth
-I (5308) example_common: - IPv4 address: 172.168.30.45,
-I (5308) example_common: - IPv6 address: fe80:0000:0000:0000:6255:f9ff:fefb:c23a, type: ESP_IP6_ADDR_IS_LINK_LOCAL
-I (5318) example_init_video: MIPI-CSI camera sensor I2C port=0, scl_pin=8, sda_pin=7, freq=100000
-I (5328) example_init_video: DVP camera sensor I2C port=1, scl_pin=8, sda_pin=7, freq=100000
-I (5378) ov2640: Detected Camera sensor PID=0x26
-I (5378) gc2145: Detected Camera sensor PID=0x2145
-I (5808) example: video0: width=640 height=480 format=RGBP
-W (5908) example: JPEG compression quality=80 is out of sensor's range, reset to 63
-I (5908) example: video1: width=640 height=480 format=JPEG
-I (5908) example: Starting stream server on port: '80'
-I (5918) example: Camera web server starts
-I (5918) main_task: Returned from app_main()
-...
+```bash
+cd frontend
+pnpm install
+pnpm compress
+cd ..
+idf.py build
 ```
 
-## Accessing the Web Interface
+`pnpm compress` 会构建前端，并将结果压缩到 `frontend/gzipped/`；这些文件会由 `main/CMakeLists.txt` 嵌入固件。
 
-1. **Open your web browser** and navigate to one of the following:
-   - `http://esp-web.local` (using mDNS)
-   - `http://172.168.30.45` (replace with your device's IP address from the log output)
+## 目录说明
 
-2. **Web interface features:**
-   - View live video streams from connected cameras
-   - **Camera Icon**: Download JPEG-formatted images from the selected video streams
-   - **Raw Icon**: Download raw binary image data from the selected video streams
-   - **Gear Icon**: Configure the image parameters to the selected video streams
+| 路径 | 作用 |
+| --- | --- |
+| `main/` | 固件入口、摄像头采集、Wi-Fi 配网、WebSocket 推流、HTTP 与诊断模块 |
+| `main/camera_source.*` | V4L2 采集、JPEG 处理、缓冲区与掉线恢复相关逻辑 |
+| `main/ws_streamer.*` | WebSocket 客户端、帧队列和发送任务 |
+| `main/provisioning_manager.*` | AP 配网门户与凭据保存 |
+| `frontend/` | Vue 网页源代码与压缩资源生成脚本 |
+| `components/example_video_common/` | 摄像头初始化和编码公共组件 |
+| `managed_components/` | ESP-IDF 组件管理器下载的依赖，不建议直接修改 |
+| `PORTING_WAVESHARE.md` | Waveshare 板卡移植与引脚配置说明 |
+| `partitions.csv` | Flash 分区表 |
 
-![Camera Web Interface](./pic/camera_web_pic.png)
+## 排查建议
 
-## Troubleshooting
+- 看不到 USB 摄像头：确认使用支持 UVC 的摄像头、供电充足、端口/跳线与所选验证模式匹配；串口日志会显示初始化重试。
+- 无法连接 Wi-Fi：确认 C6/ESP-HOSTED 的 SDIO 配置和凭据；必要时长按 BOOT 后重新配网。
+- PC 未收到画面：确认 PC IP 已在配网页保存、PC 防火墙允许 TCP 8765、接收服务已先启动，并且设备与 PC 在可互通的网络中。
+- 网页无法打开：检查是否仍启用 USB 网络验证模式；该模式按设计不启动普通 HTTP 服务。
+- 内存不足或丢帧：适当降低分辨率/帧率、JPEG 质量或 USB URB 与缓冲区数量，并观察串口的 heap/PSRAM 诊断日志。
 
-### Common Issues
+## 许可与来源
 
-**1. I2C Transaction Errors**
-
-```
-E (1595) i2c.master: I2C transaction unexpected nack detected
-E (1595) i2c.master: s_i2c_synchronous_transaction(870): I2C transaction failed
-```
-
-**Solutions:**
-- Verify that the camera sensor is properly connected to the development board
-- Check that the I2C pins (SCL/SDA) are correctly configured in menuconfig
-- Ensure the I2C pull-up resistors are present on your board
-- Verify the camera sensor power supply is stable
+本项目基于乐鑫 ESP-IDF 视频服务器示例进行修改；源文件保留各自的版权与许可证声明。
