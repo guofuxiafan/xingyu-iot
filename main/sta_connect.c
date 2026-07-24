@@ -128,6 +128,16 @@ esp_err_t sta_connect_from_nvs(void)
         return err;
     }
 
+    /*
+     * The default WIFI_PS_MIN_MODEM mode can add DTIM-cycle latency.  This
+     * application continuously uploads large camera frames, so favor stable
+     * throughput and latency over station power saving.
+     */
+    err = esp_wifi_set_ps(WIFI_PS_NONE);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to disable WiFi power save: %s", esp_err_to_name(err));
+    }
+
     /* Block until got_ip (success) or max retries exceeded (failure) */
     BaseType_t sem_ret = xSemaphoreTake(s_sem_connect_done, pdMS_TO_TICKS(30000));
 

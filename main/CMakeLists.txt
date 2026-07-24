@@ -15,7 +15,7 @@ set(html_files "../frontend/gzipped/index.html.gz"
 
 idf_component_register(SRCS "${srcs}"
                        PRIV_INCLUDE_DIRS .
-                        PRIV_REQUIRES nvs_flash esp_wifi esp_netif esp_http_server esp_event esp_driver_gpio
+                        PRIV_REQUIRES nvs_flash esp_wifi esp_netif esp_http_server esp_event esp_driver_gpio esp_psram
                                       esp_mm esp_timer json lwip mdns esp_websocket_client example_video_common
                        EMBED_TXTFILES ${html_files}
                        EMBED_FILES root.html)

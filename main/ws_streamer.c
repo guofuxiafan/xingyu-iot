@@ -16,6 +16,10 @@
 #define WS_POOL_NODES 3
 #define WS_QUEUE_LEN  3
 #define WS_PROCESSING_CORE 1
+#define WS_CLIENT_BUFFER_SIZE (16 * 1024)
+#define WS_SEND_TIMEOUT_MS     15000
+#define WS_NETWORK_TIMEOUT_MS  15000
+#define WS_RECONNECT_TIMEOUT_MS 5000
 
 typedef struct {
     uint8_t data[WS_STREAMER_FRAME_HEADER_SIZE + WS_STREAMER_MAX_JPEG_SIZE];
@@ -108,7 +112,7 @@ static void ws_send_task(void *arg)
                 int sent = esp_websocket_client_send_bin(s_ws_client,
                                                          (const char *)node->data,
                                                          node->payload_len,
-                                                         pdMS_TO_TICKS(2000));
+                                                         pdMS_TO_TICKS(WS_SEND_TIMEOUT_MS));
                 if (sent < 0) {
                     ESP_LOGW(TAG, "WebSocket send failed: %d", sent);
                 } else if ((uint32_t)sent != node->payload_len) {
@@ -159,9 +163,19 @@ esp_err_t ws_streamer_start(const char *url)
 
     esp_websocket_client_config_t ws_cfg = {
         .uri = url,
-        .reconnect_timeout_ms = 5000,
-        .network_timeout_ms = 5000,
+        /*
+         * Camera JPEG messages are commonly 150-250 KiB.  The component's
+         * 1 KiB default buffer fragments each message into hundreds of socket
+         * writes, which makes a short timeout very sensitive to TCP backpressure.
+         */
+        .buffer_size = WS_CLIENT_BUFFER_SIZE,
+        .reconnect_timeout_ms = WS_RECONNECT_TIMEOUT_MS,
+        .network_timeout_ms = WS_NETWORK_TIMEOUT_MS,
         .disable_auto_reconnect = false,
+        .keep_alive_enable = true,
+        .keep_alive_idle = 5,
+        .keep_alive_interval = 5,
+        .keep_alive_count = 3,
     };
     s_ws_client = esp_websocket_client_init(&ws_cfg);
     ESP_RETURN_ON_FALSE(s_ws_client, ESP_FAIL, TAG, "failed to init WebSocket client");
