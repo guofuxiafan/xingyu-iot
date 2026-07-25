@@ -345,6 +345,15 @@ failed_0:
     return ret;
 }
 
+i2c_master_bus_handle_t example_video_get_i2c_bus(void)
+{
+#if CONFIG_EXAMPLE_SCCB_I2C_INIT_BY_APP
+    return s_is_init ? s_i2cbus_handle : NULL;
+#else
+    return NULL;
+#endif
+}
+
 /**
  * @brief Deinitialize the video system
  *

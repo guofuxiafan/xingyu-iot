@@ -1,5 +1,36 @@
 menu "Example Configuration"
 
+    config EXAMPLE_VOICE_OUTPUT_ENABLE
+        bool "Read local JSON aloud through the SPK connector"
+        default y
+        depends on IDF_TARGET_ESP32P4
+        help
+            Mount the local SPIFFS partition, watch /storage for new or
+            updated JSON files and synthesize their Chinese UTF-8 text with
+            the offline ESP-TTS model.
+
+    config EXAMPLE_VOICE_OUTPUT_VOLUME
+        int "Speaker volume (%)"
+        depends on EXAMPLE_VOICE_OUTPUT_ENABLE
+        default 65
+        range 0 100
+
+    config EXAMPLE_VOICE_OUTPUT_SPEED
+        int "TTS speed"
+        depends on EXAMPLE_VOICE_OUTPUT_ENABLE
+        default 3
+        range 0 5
+        help
+            ESP-TTS speech speed. Larger values speak faster.
+
+    config EXAMPLE_VOICE_OUTPUT_POLL_INTERVAL_MS
+        int "JSON folder polling interval (ms)"
+        depends on EXAMPLE_VOICE_OUTPUT_ENABLE
+        default 2000
+        range 200 60000
+        help
+            How often /storage is scanned for new or updated JSON files.
+
     config EXAMPLE_USB_MINIMAL_VALIDATION_MODE
         bool "USB-only minimal validation mode"
         default n

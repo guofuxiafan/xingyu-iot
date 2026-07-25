@@ -34,6 +34,7 @@
 #include "sta_connect.h"
 #include "wifi_cred_store.h"
 #include "ws_streamer.h"
+#include "voice_output.h"
 
 #define EXAMPLE_MDNS_INSTANCE  CONFIG_EXAMPLE_MDNS_INSTANCE
 #define EXAMPLE_MDNS_HOST_NAME CONFIG_EXAMPLE_MDNS_HOST_NAME
@@ -57,6 +58,17 @@ static uint8_t s_source_count;
 static SemaphoreHandle_t s_sources_mutex;
 
 #define MEMORY_DIAGNOSTICS_INTERVAL_MS 60000
+
+static void start_voice_output(void)
+{
+#if CONFIG_EXAMPLE_VOICE_OUTPUT_ENABLE
+    esp_err_t ret = voice_output_start();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Voice output unavailable; camera continues: %s",
+                 esp_err_to_name(ret));
+    }
+#endif
+}
 
 static void memory_diagnostics_task(void *arg)
 {
@@ -509,6 +521,7 @@ void app_main(void)
 #if CONFIG_EXAMPLE_USB_MINIMAL_VALIDATION_MODE
     ESP_LOGW(TAG, "USB minimal validation mode: CSI, Wi-Fi, WebSocket and HTTP are disabled");
     ESP_ERROR_CHECK(example_video_init());
+    start_voice_output();
     ESP_ERROR_CHECK(start_camera_sources());
     ESP_LOGI(TAG, "USB minimal validation started; connect one camera directly to the USB root port");
     return;
@@ -530,6 +543,7 @@ void app_main(void)
     }
 
     ESP_ERROR_CHECK(example_video_init());
+    start_voice_output();
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     ESP_ERROR_CHECK(provisioning_button_init());
@@ -579,6 +593,7 @@ void app_main(void)
     }
 
     ESP_ERROR_CHECK(example_video_init());
+    start_voice_output();
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
