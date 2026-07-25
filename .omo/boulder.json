@@ -1,0 +1,14 @@
+{
+  "schema_version": 2,
+  "active_work_id": "network-voice-json",
+  "works": {
+    "network-voice-json": {
+      "work_id": "network-voice-json",
+      "active_plan": ".omo/plans/network-voice-json.md",
+      "plan_name": "network-voice-json",
+      "session_ids": ["opencode:ses_0689711aaffe7p6hnL8WknWccD"],
+      "status": "active",
+      "worktree_path": null
+    }
+  }
+}

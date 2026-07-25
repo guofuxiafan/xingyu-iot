@@ -86,13 +86,13 @@ menu "Example Configuration"
 
     config EXAMPLE_USB_CAMERA_VIDEO_BUFFER_NUMBER
         int "USB camera video buffer number"
-        default 4
+        default 8
         range 4 10
         help
             Number of V4L2 frame buffers per USB UVC camera.
 
-            Four buffers per stream are sufficient for the fixed 10fps YUYV
-            mode while leaving PSRAM for JPEG output buffers.
+            Eight buffers per stream provide additional scheduling headroom for
+            the fixed 60fps MJPEG mode while leaving PSRAM for other camera data.
 
     config EXAMPLE_USB_UVC_URB_NUMBER
         int "USB UVC in-flight URB number"

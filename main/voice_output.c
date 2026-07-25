@@ -26,6 +26,8 @@
 #include "esp_tts_voice_template.h"
 #include "example_video_common.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
 
@@ -51,6 +53,8 @@ static i2s_chan_handle_t s_tx_chan;
 static esp_tts_handle_t s_tts;
 static esp_partition_mmap_handle_t s_voice_mmap;
 static bool s_started;
+static SemaphoreHandle_t s_tts_mutex;
+static QueueHandle_t s_voice_queue;
 
 typedef struct {
     bool active;
@@ -353,7 +357,9 @@ static esp_err_t process_json_file(const char *name)
     ESP_RETURN_ON_FALSE(root, ESP_ERR_INVALID_ARG, TAG, "invalid JSON: %s",
                         path);
     ESP_LOGI(TAG, "new or updated JSON detected: %s", path);
+    xSemaphoreTake(s_tts_mutex, portMAX_DELAY);
     esp_err_t ret = speak_json_value(root);
+    xSemaphoreGive(s_tts_mutex);
     cJSON_Delete(root);
     return ret;
 }
@@ -398,6 +404,18 @@ static void voice_task(void *arg)
     ESP_LOGI(TAG, "watching %s for JSON files every %d ms", VOICE_JSON_DIR,
              CONFIG_EXAMPLE_VOICE_OUTPUT_POLL_INTERVAL_MS);
     while (true) {
+        char *json = NULL;
+        while (xQueueReceive(s_voice_queue, &json, 0) == pdTRUE) {
+            cJSON *root = cJSON_Parse(json);
+            free(json);
+            if (root) {
+                xSemaphoreTake(s_tts_mutex, portMAX_DELAY);
+                speak_json_value(root);
+                xSemaphoreGive(s_tts_mutex);
+                cJSON_Delete(root);
+            }
+        }
+
         esp_err_t ret = poll_json_directory();
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "JSON directory poll failed: %s",
@@ -408,11 +426,31 @@ static void voice_task(void *arg)
     }
 }
 
+esp_err_t voice_output_speak_json(const char *json_str)
+{
+    if (!s_started || !json_str) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    char *copy = strdup(json_str);
+    if (!copy) {
+        return ESP_ERR_NO_MEM;
+    }
+    if (xQueueSend(s_voice_queue, &copy, 0) != pdTRUE) {
+        free(copy);
+        ESP_LOGW(TAG, "voice queue full, dropping JSON");
+        return ESP_ERR_TIMEOUT;
+    }
+    return ESP_OK;
+}
+
 esp_err_t voice_output_start(void)
 {
     if (s_started) {
         return ESP_OK;
     }
+
+    s_tts_mutex = xSemaphoreCreateMutex();
+    s_voice_queue = xQueueCreate(8, sizeof(char *));
 
     esp_vfs_spiffs_conf_t fs_cfg = {
         .base_path = "/storage",
@@ -437,6 +475,12 @@ esp_err_t voice_output_start(void)
 
 esp_err_t voice_output_start(void)
 {
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+esp_err_t voice_output_speak_json(const char *json_str)
+{
+    (void)json_str;
     return ESP_ERR_NOT_SUPPORTED;
 }
 
