@@ -10,6 +10,7 @@
 #include "esp_video_device.h"
 #include "esp_video_init.h"
 #include "esp_video_ioctl.h"
+#include "driver/i2c_master.h"
 #include "example_video_common_board.h"
 
 #ifdef __cplusplus
@@ -192,6 +193,13 @@ typedef struct example_encoder_config {
  * @return ESP_OK on success or other value on failure
  */
 esp_err_t example_video_init(void);
+
+/**
+ * @brief Get the shared SCCB/I2C bus created by example_video_init().
+ *
+ * @return I2C bus handle, or NULL when the shared bus is unavailable.
+ */
+i2c_master_bus_handle_t example_video_get_i2c_bus(void);
 
 /**
  * @brief Deinitialize the video system

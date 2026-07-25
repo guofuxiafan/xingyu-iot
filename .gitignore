@@ -11,6 +11,11 @@ sdkconfig.old
 __pycache__/
 dependencies.lock
 managed_components/__lock*
+managed_components/espressif__cjson/
+managed_components/espressif__dl_fft/
+managed_components/espressif__esp-dsp/
+managed_components/espressif__esp-sr/
+managed_components/espressif__esp_codec_dev/
 .esptool_py_*_args*
 flasher_args.json
 flash_args*

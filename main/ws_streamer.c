@@ -12,6 +12,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_websocket_client.h"
+#include "voice_output.h"
 
 #define WS_POOL_NODES 8
 #define WS_POOL_MAX_PER_CAM 4   // each camera guaranteed 4 of 8
@@ -141,6 +142,36 @@ static void ws_send_task(void *arg)
     }
 }
 
+static void ws_event_handler(void *arg, esp_event_base_t base, int32_t event_id, void *event_data)
+{
+    (void)arg;
+    (void)base;
+    (void)event_id;
+
+    esp_websocket_event_data_t *data = (esp_websocket_event_data_t *)event_data;
+    if (data->op_code != 0x01) {
+        return;
+    }
+    if (!data->fin) {
+        ESP_LOGW(TAG, "voice: fragmented WS message ignored");
+        return;
+    }
+
+    char *json = malloc(data->data_len + 1);
+    if (!json) {
+        ESP_LOGW(TAG, "voice: OOM, dropped WS text frame");
+        return;
+    }
+    memcpy(json, data->data_ptr, data->data_len);
+    json[data->data_len] = '\0';
+
+    esp_err_t ret = voice_output_speak_json(json);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "voice: dropped (%s)", esp_err_to_name(ret));
+    }
+    free(json);
+}
+
 esp_err_t ws_streamer_start(const char *url)
 {
     if (url == NULL || url[0] == '\0') {
@@ -194,6 +225,8 @@ esp_err_t ws_streamer_start(const char *url)
     };
     s_ws_client = esp_websocket_client_init(&ws_cfg);
     ESP_RETURN_ON_FALSE(s_ws_client, ESP_FAIL, TAG, "failed to init WebSocket client");
+
+    esp_websocket_register_events(s_ws_client, WEBSOCKET_EVENT_DATA, ws_event_handler, NULL);
 
     ESP_LOGI(TAG, "WebSocket connecting to %s", url);
     return esp_websocket_client_start(s_ws_client);
