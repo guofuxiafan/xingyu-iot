@@ -34,6 +34,7 @@
 #include "sta_connect.h"
 #include "wifi_cred_store.h"
 #include "ws_streamer.h"
+
 #include "voice_output.h"
 
 #define EXAMPLE_MDNS_INSTANCE  CONFIG_EXAMPLE_MDNS_INSTANCE
@@ -543,7 +544,9 @@ void app_main(void)
     }
 
     ESP_ERROR_CHECK(example_video_init());
+
     start_voice_output();
+
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     ESP_ERROR_CHECK(provisioning_button_init());

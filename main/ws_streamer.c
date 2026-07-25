@@ -14,10 +14,11 @@
 #include "esp_websocket_client.h"
 #include "voice_output.h"
 
-#define WS_POOL_NODES 3
-#define WS_QUEUE_LEN  3
-#define WS_PROCESSING_CORE 1
-#define WS_CLIENT_BUFFER_SIZE (16 * 1024)
+#define WS_POOL_NODES 8
+#define WS_POOL_MAX_PER_CAM 4   // each camera guaranteed 4 of 8
+#define WS_QUEUE_LEN  6
+#define WS_PROCESSING_CORE 0
+#define WS_CLIENT_BUFFER_SIZE (128 * 1024)
 #define WS_SEND_TIMEOUT_MS     15000
 #define WS_NETWORK_TIMEOUT_MS  15000
 #define WS_RECONNECT_TIMEOUT_MS 5000
@@ -26,6 +27,7 @@ typedef struct {
     uint8_t data[WS_STREAMER_FRAME_HEADER_SIZE + WS_STREAMER_MAX_JPEG_SIZE];
     uint32_t payload_len;
     uint8_t in_use;
+    uint8_t camera_id;
 } __attribute__((aligned(64))) ws_frame_node_t;
 
 static const char *TAG = "ws_streamer";
@@ -39,6 +41,7 @@ static ws_frame_node_t *s_pool;
 static volatile uint32_t s_pool_drop_count;
 static volatile uint32_t s_queue_drop_count;
 static volatile int64_t s_next_drop_log_us;
+static volatile int s_pool_in_use_per_cam[2];   // cam0, cam1 node counts
 
 static void log_submit_drop_limited(bool pool_empty)
 {
@@ -63,15 +66,23 @@ static void log_submit_drop_limited(bool pool_empty)
              pool_drops, queue_drops);
 }
 
-static ws_frame_node_t *grab_pool_node(void)
+static ws_frame_node_t *grab_pool_node(uint8_t camera_id)
 {
+    int cam_idx = (camera_id == 0) ? 0 : 1;
     if (!s_pool || xSemaphoreTake(s_pool_lock, pdMS_TO_TICKS(20)) != pdPASS) {
         return NULL;
+    }
+
+    if (s_pool_in_use_per_cam[cam_idx] >= WS_POOL_MAX_PER_CAM) {
+        xSemaphoreGive(s_pool_lock);
+        return NULL;  // this camera exhausted its quota
     }
 
     for (int i = 0; i < WS_POOL_NODES; i++) {
         if (!s_pool[i].in_use) {
             s_pool[i].in_use = 1;
+            s_pool[i].camera_id = camera_id;
+            s_pool_in_use_per_cam[cam_idx]++;
             xSemaphoreGive(s_pool_lock);
             return &s_pool[i];
         }
@@ -88,6 +99,10 @@ static void release_pool_node(ws_frame_node_t *node)
     }
 
     if (xSemaphoreTake(s_pool_lock, pdMS_TO_TICKS(20)) == pdPASS) {
+        int cam_idx = (node->camera_id == 0) ? 0 : 1;
+        if (node->in_use && s_pool_in_use_per_cam[cam_idx] > 0) {
+            s_pool_in_use_per_cam[cam_idx]--;
+        }
         node->in_use = 0;
         xSemaphoreGive(s_pool_lock);
     }
@@ -150,8 +165,9 @@ static void ws_event_handler(void *arg, esp_event_base_t base, int32_t event_id,
     memcpy(json, data->data_ptr, data->data_len);
     json[data->data_len] = '\0';
 
-    if (voice_output_speak_json(json) != ESP_OK) {
-        ESP_LOGW(TAG, "voice: queue full, dropped");
+    esp_err_t ret = voice_output_speak_json(json);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "voice: dropped (%s)", esp_err_to_name(ret));
     }
     free(json);
 }
@@ -232,7 +248,7 @@ esp_err_t ws_streamer_submit(const ws_streamer_frame_t *frame)
         return ESP_ERR_INVALID_SIZE;
     }
 
-    ws_frame_node_t *node = grab_pool_node();
+    ws_frame_node_t *node = grab_pool_node(frame->camera_id);
     if (!node) {
         log_submit_drop_limited(true);
         return ESP_ERR_NO_MEM;

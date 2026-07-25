@@ -110,9 +110,11 @@ async def send_voice_to_esp32(text: str) -> bool:
         return False
     payload = json_module.dumps({"items": [{"text": text}]}, ensure_ascii=False)
     disconnected = []
+    sent_count = 0
     for client_ip, ws in list(active_ws_connections.items()):
         try:
             await ws.send(payload)
+            sent_count += 1
         except (
             websockets.exceptions.ConnectionClosed,
             websockets.exceptions.ConnectionClosedOK,
@@ -121,7 +123,7 @@ async def send_voice_to_esp32(text: str) -> bool:
             disconnected.append(client_ip)
     for ip in disconnected:
         active_ws_connections.pop(ip, None)
-    return True
+    return sent_count > 0
 
 
 async def websocket_handler(websocket):
@@ -288,7 +290,7 @@ async def http_handler(reader: asyncio.StreamReader, writer: asyncio.StreamWrite
             )
             writer.write(body)
             await writer.drain()
-        elif b"POST /voice" in request_line:
+        elif "POST /voice" in request_line:
             try:
                 body_start = request.find(b"\r\n\r\n")
                 if body_start >= 0:
@@ -339,7 +341,7 @@ async def http_handler(reader: asyncio.StreamReader, writer: asyncio.StreamWrite
                 )
                 writer.write(response.encode())
                 await writer.drain()
-        elif b"POST /api/v1/fitness/coaching-events" in request_line:
+        elif "POST /api/v1/fitness/coaching-events" in request_line:
             try:
                 body_start = request.find(b"\r\n\r\n")
                 if body_start >= 0:
@@ -364,10 +366,12 @@ async def http_handler(reader: asyncio.StreamReader, writer: asyncio.StreamWrite
                 if active_ws_connections:
                     await send_voice_to_esp32(suggestion)
                     response = json_module.dumps({"accepted": True, "event_id": event_id})
+                    status_line = b"HTTP/1.1 200 OK\r\n"
                 else:
                     response = json_module.dumps({"accepted": False, "event_id": event_id, "error": "no ESP32 connected"})
+                    status_line = b"HTTP/1.1 503 Service Unavailable\r\n"
                 writer.write(
-                    b"HTTP/1.1 200 OK\r\n"
+                    status_line +
                     b"Content-Type: application/json\r\n"
                     b"Content-Length: " + str(len(response)).encode() + b"\r\n"
                     b"\r\n"
