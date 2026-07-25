@@ -350,10 +350,13 @@ async def http_handler(reader: asyncio.StreamReader, writer: asyncio.StreamWrite
                 else:
                     data = {}
                 event = data if isinstance(data, dict) else {}
-                suggestion = event.get("coaching", {}).get("suggestion", "") if isinstance(event.get("coaching"), dict) else ""
+                # fitagent1 发送扁平格式 {"suggestion": "..."}，也兼容嵌套 coaching 格式
+                suggestion = event.get("suggestion", "")
+                if not suggestion and isinstance(event.get("coaching"), dict):
+                    suggestion = event["coaching"].get("suggestion", "")
                 event_id = event.get("event_id", "")
                 if not suggestion:
-                    response = json_module.dumps({"accepted": False, "event_id": event_id, "error": "missing coaching.suggestion"})
+                    response = json_module.dumps({"accepted": False, "event_id": event_id, "error": "missing suggestion"})
                     writer.write(
                         b"HTTP/1.1 400 Bad Request\r\n"
                         b"Content-Type: application/json\r\n"
