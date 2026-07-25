@@ -22,7 +22,7 @@ from pathlib import Path
 # ── 配置 ──────────────────────────────────────────────
 SAVE_DIR = Path(r"D:\WHR\program\iot\camera\imagebase")
 MAX_FILES = 600          # 最多保留 600 张（1 分钟 × 10fps）
-TARGET_FPS = 10          # 目标帧率
+TARGET_FPS = 30          # 目标帧率
 FRAME_INTERVAL = 1.0 / TARGET_FPS  # 每帧间隔（秒）
 
 DEFAULT_URL = "http://esp-web.local:81/stream"

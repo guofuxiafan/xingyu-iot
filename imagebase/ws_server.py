@@ -8,6 +8,8 @@ import struct
 from datetime import datetime
 from pathlib import Path
 
+import json as json_module
+
 import websockets
 
 WS_PORT = 8765
@@ -35,6 +37,8 @@ latest_frames: dict[int, bytes] = {}
 latest_frame_infos: dict[int, dict] = {}
 frame_counters: dict[int, int] = {0: 0, 1: 0, 2: 0}
 frame_queues: dict[int, asyncio.Queue] = {i: asyncio.Queue(maxsize=2) for i in range(3)}
+
+active_ws_connections: dict[str, websockets.WebSocketServerProtocol] = {}
 
 
 def parse_frame(data: bytes) -> tuple[int, int, bytes]:
@@ -101,10 +105,30 @@ def cleanup_old_frames(camera_id: int) -> None:
         print(f"[cleanup] cam{camera_id} deleted old frame: {oldest.name}")
 
 
+async def send_voice_to_esp32(text: str) -> bool:
+    if not active_ws_connections:
+        return False
+    payload = json_module.dumps({"items": [{"text": text}]}, ensure_ascii=False)
+    disconnected = []
+    for client_ip, ws in list(active_ws_connections.items()):
+        try:
+            await ws.send(payload)
+        except (
+            websockets.exceptions.ConnectionClosed,
+            websockets.exceptions.ConnectionClosedOK,
+            websockets.exceptions.ConnectionClosedError,
+        ):
+            disconnected.append(client_ip)
+    for ip in disconnected:
+        active_ws_connections.pop(ip, None)
+    return True
+
+
 async def websocket_handler(websocket):
     """Receive ESP32-P4 frames and route them by camera id."""
     client_ip = websocket.remote_address[0] if websocket.remote_address else "unknown"
     print(f"[WS] Client connected from {client_ip}")
+    active_ws_connections[client_ip] = websocket
 
     try:
         async for message in websocket:
@@ -144,8 +168,10 @@ async def websocket_handler(websocket):
 
     except websockets.exceptions.ConnectionClosed:
         print(f"[WS] Client {client_ip} disconnected")
+        active_ws_connections.pop(client_ip, None)
     except Exception as e:
         print(f"[WS] Error: {e}")
+        active_ws_connections.pop(client_ip, None)
 
     print("[WS] Waiting for new connection...")
 
@@ -209,6 +235,26 @@ def render_index() -> bytes:
         '  <div class="camera-card"><h2>USB (cam1)</h2><img src="/stream_l" alt="cam1"></div>\n'
         '  <div class="camera-card"><h2>HOST3 (cam2)</h2><img src="/stream_r" alt="cam2"></div>\n'
         "</div>\n"
+        '<div class="voice-control" style="margin-top:30px;padding:15px;background:#2a2a2a;border-radius:10px;display:inline-block;">\n'
+        '<h2 style="font-size:16px;margin:0 0 10px 0;">Voice to ESP32</h2>\n'
+        '<input id="voiceText" type="text" placeholder="Enter text to speak..." style="padding:8px;width:300px;border:1px solid #444;border-radius:5px;background:#333;color:#fff;">\n'
+        '<button onclick="sendVoice()" style="padding:8px 16px;margin-left:8px;background:#007acc;color:#fff;border:none;border-radius:5px;cursor:pointer;">Send</button>\n'
+        '<span id="voiceStatus" style="margin-left:10px;color:#888;"></span>\n'
+        "</div>\n"
+        "<script>\n"
+        "async function sendVoice() {\n"
+        "  const text = document.getElementById('voiceText').value;\n"
+        "  const status = document.getElementById('voiceStatus');\n"
+        "  if (!text) { status.textContent = 'Please enter text'; status.style.color = 'red'; return; }\n"
+        "  status.textContent = 'Sending...'; status.style.color = '#888';\n"
+        "  try {\n"
+        "    const resp = await fetch('/voice', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text})});\n"
+        "    const data = await resp.json();\n"
+        "    if (data.ok) { status.textContent = 'Sent!'; status.style.color = 'lime'; }\n"
+        "    else { status.textContent = data.message; status.style.color = 'orange'; }\n"
+        "  } catch(e) { status.textContent = 'Error: ' + e.message; status.style.color = 'red'; }\n"
+        "}\n"
+        "</script>\n"
         "</body>\n"
         "</html>\n"
     )
@@ -242,6 +288,102 @@ async def http_handler(reader: asyncio.StreamReader, writer: asyncio.StreamWrite
             )
             writer.write(body)
             await writer.drain()
+        elif b"POST /voice" in request_line:
+            try:
+                body_start = request.find(b"\r\n\r\n")
+                if body_start >= 0:
+                    raw_body = request[body_start + 4:]
+                    data = json_module.loads(raw_body.decode(errors="replace"))
+                else:
+                    data = {}
+                text = data.get("text", "")
+                if not text:
+                    response = json_module.dumps({"ok": False, "message": "missing text field"})
+                    writer.write(
+                        b"HTTP/1.1 400 Bad Request\r\n"
+                        b"Content-Type: application/json\r\n"
+                        b"Content-Length: " + str(len(response)).encode() + b"\r\n"
+                        b"\r\n"
+                    )
+                    writer.write(response.encode())
+                    await writer.drain()
+                    return
+                if not active_ws_connections:
+                    response = json_module.dumps({"ok": False, "message": "no ESP32 connected"})
+                    writer.write(
+                        b"HTTP/1.1 503 Service Unavailable\r\n"
+                        b"Content-Type: application/json\r\n"
+                        b"Content-Length: " + str(len(response)).encode() + b"\r\n"
+                        b"\r\n"
+                    )
+                    writer.write(response.encode())
+                    await writer.drain()
+                    return
+                success = await send_voice_to_esp32(text)
+                response = json_module.dumps({"ok": success, "message": "sent" if success else "send failed"})
+                writer.write(
+                    b"HTTP/1.1 200 OK\r\n"
+                    b"Content-Type: application/json\r\n"
+                    b"Content-Length: " + str(len(response)).encode() + b"\r\n"
+                    b"\r\n"
+                )
+                writer.write(response.encode())
+                await writer.drain()
+            except Exception:
+                response = json_module.dumps({"ok": False, "message": "invalid JSON"})
+                writer.write(
+                    b"HTTP/1.1 400 Bad Request\r\n"
+                    b"Content-Type: application/json\r\n"
+                    b"Content-Length: " + str(len(response)).encode() + b"\r\n"
+                    b"\r\n"
+                )
+                writer.write(response.encode())
+                await writer.drain()
+        elif b"POST /api/v1/fitness/coaching-events" in request_line:
+            try:
+                body_start = request.find(b"\r\n\r\n")
+                if body_start >= 0:
+                    raw_body = request[body_start + 4:]
+                    data = json_module.loads(raw_body.decode(errors="replace"))
+                else:
+                    data = {}
+                event = data if isinstance(data, dict) else {}
+                suggestion = event.get("coaching", {}).get("suggestion", "") if isinstance(event.get("coaching"), dict) else ""
+                event_id = event.get("event_id", "")
+                if not suggestion:
+                    response = json_module.dumps({"accepted": False, "event_id": event_id, "error": "missing coaching.suggestion"})
+                    writer.write(
+                        b"HTTP/1.1 400 Bad Request\r\n"
+                        b"Content-Type: application/json\r\n"
+                        b"Content-Length: " + str(len(response)).encode() + b"\r\n"
+                        b"\r\n"
+                    )
+                    writer.write(response.encode())
+                    await writer.drain()
+                    return
+                if active_ws_connections:
+                    await send_voice_to_esp32(suggestion)
+                    response = json_module.dumps({"accepted": True, "event_id": event_id})
+                else:
+                    response = json_module.dumps({"accepted": False, "event_id": event_id, "error": "no ESP32 connected"})
+                writer.write(
+                    b"HTTP/1.1 200 OK\r\n"
+                    b"Content-Type: application/json\r\n"
+                    b"Content-Length: " + str(len(response)).encode() + b"\r\n"
+                    b"\r\n"
+                )
+                writer.write(response.encode())
+                await writer.drain()
+            except Exception:
+                response = json_module.dumps({"accepted": False, "event_id": "", "error": "invalid JSON"})
+                writer.write(
+                    b"HTTP/1.1 400 Bad Request\r\n"
+                    b"Content-Type: application/json\r\n"
+                    b"Content-Length: " + str(len(response)).encode() + b"\r\n"
+                    b"\r\n"
+                )
+                writer.write(response.encode())
+                await writer.drain()
         else:
             writer.write(
                 b"HTTP/1.1 404 Not Found\r\n"
