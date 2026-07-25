@@ -288,7 +288,7 @@ async def http_handler(reader: asyncio.StreamReader, writer: asyncio.StreamWrite
             )
             writer.write(body)
             await writer.drain()
-        elif b"POST /voice" in request_line:
+        elif "POST /voice" in request_line:
             try:
                 body_start = request.find(b"\r\n\r\n")
                 if body_start >= 0:
