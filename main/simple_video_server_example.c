@@ -40,7 +40,7 @@
 #define EXAMPLE_MDNS_INSTANCE  CONFIG_EXAMPLE_MDNS_INSTANCE
 #define EXAMPLE_MDNS_HOST_NAME CONFIG_EXAMPLE_MDNS_HOST_NAME
 #define CSI_JPEG_QUALITY       CONFIG_EXAMPLE_JPEG_COMPRESSION_QUALITY
-#define USB_JPEG_QUALITY       70
+#define USB_JPEG_QUALITY       45
 
 extern const uint8_t index_html_gz_start[] asm("_binary_index_html_gz_start");
 extern const uint8_t index_html_gz_end[] asm("_binary_index_html_gz_end");
@@ -324,7 +324,7 @@ static esp_err_t start_camera_sources(void)
             .dev_name = ESP_VIDEO_MIPI_CSI_DEVICE_NAME,
             .width = CAMERA_SOURCE_CSI_WIDTH,
             .height = CAMERA_SOURCE_CSI_HEIGHT,
-            .jpeg_quality = CSI_JPEG_QUALITY,
+            .jpeg_quality = CSI_JPEG_QUALITY,           
             .frame_cb = camera_frame_cb,
         },
 #endif

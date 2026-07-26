@@ -685,7 +685,8 @@ static esp_err_t uvc_claim_interface(uvc_stream_t *uvc_stream, uint8_t uvc_index
 
     uint16_t requested_mps = MAX_MPS_IN;
     if (vs_format->format == UVC_VS_FORMAT_MJPEG &&
-            vs_format->h_res <= 640 && vs_format->v_res <= 480) {
+            vs_format->h_res <= 640 && vs_format->v_res <= 480 &&
+            !SLIST_EMPTY(&p_uvc_host_driver->uvc_stream_list)) {
         requested_mps = UVC_DUAL_MJPEG_MAX_PAYLOAD;
     }
 

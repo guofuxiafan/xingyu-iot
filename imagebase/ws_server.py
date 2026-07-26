@@ -37,6 +37,7 @@ latest_frames: dict[int, bytes] = {}
 latest_frame_infos: dict[int, dict] = {}
 frame_counters: dict[int, int] = {0: 0, 1: 0, 2: 0}
 frame_queues: dict[int, asyncio.Queue] = {i: asyncio.Queue(maxsize=2) for i in range(3)}
+save_enabled: dict[int, bool] = {0: False, 1: False, 2: False}
 
 active_ws_connections: dict[str, websockets.WebSocketServerProtocol] = {}
 
@@ -99,10 +100,20 @@ def cleanup_old_frames(camera_id: int) -> None:
     """Delete oldest frames if total exceeds MAX_FRAMES for this camera directory."""
     frames_dir = FRAMES_DIRS[camera_id]
     files = sorted(frames_dir.glob("*.jpg"), key=lambda f: f.stat().st_mtime)
-    while len(files) > MAX_FRAMES:
+    excess = len(files) - MAX_FRAMES
+    if excess <= 0:
+        return
+
+    deleted = 0
+    for _ in range(excess):
         oldest = files.pop(0)
         oldest.unlink()
-        print(f"[cleanup] cam{camera_id} deleted old frame: {oldest.name}")
+        deleted += 1
+        if deleted % 200 == 0:
+            print(f"[cleanup] cam{camera_id} deleted {deleted}/{excess} old frames, "
+                  f"latest: {oldest.name}")
+    if deleted % 200 != 0:
+        print(f"[cleanup] cam{camera_id} deleted {deleted} old frames")
 
 
 async def send_voice_to_esp32(text: str) -> bool:
@@ -139,11 +150,14 @@ async def websocket_handler(websocket):
 
             try:
                 timestamp_ms, camera_id, jpeg_data = parse_frame(message)
-                filepath = save_frame(timestamp_ms, camera_id, jpeg_data)
+                if save_enabled.get(camera_id, True):
+                    filepath = save_frame(timestamp_ms, camera_id, jpeg_data)
+                else:
+                    filepath = Path(f"(save disabled)")
 
                 frame_counters[camera_id] = frame_counters.get(camera_id, 0) + 1
-                if frame_counters[camera_id] % 50 == 0:
-                    cleanup_old_frames(camera_id)
+                if frame_counters[camera_id] % 200 == 0:
+                    ##cleanup_old_frames(camera_id)
                     print(
                         f"[WS] cam{camera_id} received {frame_counters[camera_id]} frames, "
                         f"latest {len(jpeg_data)} bytes -> {filepath}"
@@ -263,6 +277,29 @@ def render_index() -> bytes:
     return html.encode()
 
 
+def _handle_save_api(action: str, body: dict) -> dict:
+    """Handle /api/save/start and /api/save/stop requests."""
+    raw = body.get("camera_id")
+    if raw is None:
+        return {"ok": False, "camera_id": None, "message": "missing camera_id"}
+
+    camera_ids = raw if isinstance(raw, list) else [raw]
+    valid = [c for c in camera_ids if c in FRAMES_DIRS]
+    invalid = [c for c in camera_ids if c not in FRAMES_DIRS]
+
+    if invalid:
+        return {"ok": False, "camera_id": invalid[0] if len(invalid) == 1 else invalid,
+                "message": f"invalid camera_id: {invalid}"}
+
+    enable = action == "start"
+    for c in valid:
+        save_enabled[c] = enable
+    label = "started" if enable else "stopped"
+    names = ", ".join(f"cam{c}" for c in valid)
+    return {"ok": True, "camera_id": camera_ids if isinstance(raw, list) else raw,
+            "message": f"save {label} for {names}"}
+
+
 async def http_handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     """Handle HTTP requests for MJPEG streams and index page."""
     try:
@@ -270,6 +307,27 @@ async def http_handler(reader: asyncio.StreamReader, writer: asyncio.StreamWrite
         if not request:
             return
 
+        # POST 请求可能分包到达，循环读到 \r\n\r\n 收齐 headers，再按 Content-Length 补读 body
+        if request.startswith(b"POST "):
+            while b"\r\n\r\n" not in request:
+                chunk = await reader.read(4096)
+                if not chunk:
+                    break
+                request += chunk
+            headers_end = request.find(b"\r\n\r\n")
+            if headers_end >= 0:
+                body_start = headers_end + 4
+                cl_pos = request.find(b"Content-Length:")
+                if cl_pos >= 0:
+                    cl_end = request.find(b"\r\n", cl_pos)
+                    cl_str = request[cl_pos + 15:cl_end].strip()
+                    try:
+                        content_length = int(cl_str)
+                        remaining = content_length - (len(request) - body_start)
+                        if remaining > 0:
+                            request += await reader.readexactly(remaining)
+                    except (ValueError, asyncio.IncompleteReadError):
+                        pass
         request_line = request.decode(errors="replace").split("\r\n")[0]
         matched_cam = None
         for route, cam_id in STREAM_ROUTES.items():
@@ -391,6 +449,24 @@ async def http_handler(reader: asyncio.StreamReader, writer: asyncio.StreamWrite
                 )
                 writer.write(response.encode())
                 await writer.drain()
+        elif "POST /api/save/" in request_line:
+            body_start = request.find(b"\r\n\r\n")
+            raw_body = request[body_start + 4:] if body_start >= 0 else b"{}"
+            try:
+                data = json_module.loads(raw_body.decode(errors="replace"))
+            except Exception:
+                data = {}
+            action = "start" if " /api/save/start " in request_line else "stop"
+            response = json_module.dumps(_handle_save_api(action, data))
+            status = b"HTTP/1.1 200 OK\r\n" if response.startswith('{"ok": true') else b"HTTP/1.1 400 Bad Request\r\n"
+            writer.write(
+                status +
+                b"Content-Type: application/json\r\n"
+                b"Content-Length: " + str(len(response)).encode() + b"\r\n"
+                b"\r\n"
+            )
+            writer.write(response.encode())
+            await writer.drain()
         else:
             writer.write(
                 b"HTTP/1.1 404 Not Found\r\n"

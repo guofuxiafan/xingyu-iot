@@ -14,14 +14,15 @@
 #include "esp_websocket_client.h"
 #include "voice_output.h"
 
-#define WS_POOL_NODES 8
-#define WS_POOL_MAX_PER_CAM 4   // each camera guaranteed 4 of 8
-#define WS_QUEUE_LEN  6
+#define WS_POOL_NODES 16
+#define WS_POOL_MAX_PER_CAM 6   // each camera guaranteed 6 of 16
+#define WS_QUEUE_LEN  8
 #define WS_PROCESSING_CORE 0
 #define WS_CLIENT_BUFFER_SIZE (128 * 1024)
 #define WS_SEND_TIMEOUT_MS     15000
 #define WS_NETWORK_TIMEOUT_MS  15000
 #define WS_RECONNECT_TIMEOUT_MS 5000
+#define WS_SEND_PRIORITY       7
 
 typedef struct {
     uint8_t data[WS_STREAMER_FRAME_HEADER_SIZE + WS_STREAMER_MAX_JPEG_SIZE];
@@ -124,7 +125,7 @@ static void ws_send_task(void *arg)
                         ESP_CACHE_MSYNC_FLAG_INVALIDATE);
 
         if (s_ws_client && esp_websocket_client_is_connected(s_ws_client)) {
-            if (xSemaphoreTake(s_send_mutex, pdMS_TO_TICKS(500)) == pdPASS) {
+            if (xSemaphoreTake(s_send_mutex, pdMS_TO_TICKS(100)) == pdPASS) {
                 int sent = esp_websocket_client_send_bin(s_ws_client,
                                                          (const char *)node->data,
                                                          node->payload_len,
@@ -201,8 +202,8 @@ esp_err_t ws_streamer_start(const char *url)
         ESP_RETURN_ON_FALSE(s_queue, ESP_ERR_NO_MEM, TAG, "failed to create WebSocket queue");
     }
     if (!s_send_task) {
-        BaseType_t ok = xTaskCreatePinnedToCore(ws_send_task, "ws_send", 1024 * 6,
-                                                NULL, 5, &s_send_task,
+        BaseType_t ok = xTaskCreatePinnedToCore(ws_send_task, "ws_send", 1024 * 8,
+                                                NULL, WS_SEND_PRIORITY, &s_send_task,
                                                 WS_PROCESSING_CORE);
         ESP_RETURN_ON_FALSE(ok == pdPASS, ESP_ERR_NO_MEM, TAG, "failed to create WebSocket send task");
     }
